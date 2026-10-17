@@ -1,0 +1,684 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+public class SatelliteGame : MonoBehaviour
+{
+    enum State { Title, Trial, TrialDone, Countdown, Round, Caught, Results }
+
+    [Header("References (auto-found if empty)")]
+    public ArmTest arm;
+    [Tooltip("Point on the gripper that does the grabbing (GripArea)")]
+    public Transform gripPoint;
+    [Tooltip("The satellite object in the scene")]
+    public Transform satellite;
+    [Tooltip("Optional: an empty child of the satellite marking the part to grab. Empty = top centre of the satellite.")]
+    public Transform satelliteGrabPoint;
+    public Camera cam;
+
+    [Header("Game flow")]
+    public int rounds = 3;
+    public float countdownSeconds = 3f;
+    [Tooltip("Pause before a missed satellite comes back")]
+    public float respawnDelay = 1.5f;
+    public float caughtPause = 2f;
+
+    [Header("Difficulty")]
+    [Tooltip("Margin of error: how close (world units) the gripper must be to the grab point. 0 = auto (10% of the arm's reach).")]
+    public float catchMargin = 0f;
+    [Tooltip("The margin is multiplied by this every round. 1 = same every round, 0.8 = 20% tighter each round.")]
+    [Range(0.3f, 1f)] public float marginScalePerRound = 0.85f;
+    [Tooltip("Trial margin = catchMargin x this")]
+    public float trialMarginMultiplier = 1.5f;
+    [Tooltip("Round 1: seconds a satellite takes to drift from the screen edge to its catch point. Lower = faster.")]
+    public float entrySeconds = 7f;
+    [Tooltip("Satellite speed is multiplied by this every round")]
+    public float speedScalePerRound = 1.2f;
+    [Tooltip("How far below the grab point the gripper may be and still count as 'above', as a fraction of the margin")]
+    [Range(0f, 1f)] public float belowTolerance = 0.3f;
+    public float spinDegreesPerSecond = 10f;
+
+    [Header("Colors")]
+    public Color outlineColor = new Color(0.3f, 0.85f, 1f, 1f);
+    public Color readyColor = new Color(0.3f, 1f, 0.45f, 1f);
+
+    // ---------- runtime ----------
+    State state;
+    float stateTime;
+    int round;                       // 0-based
+    float roundTime;
+    bool timing;
+    readonly List<float> times = new List<float>();
+    readonly List<int> missedGrabs = new List<int>();
+    readonly List<int> gotAway = new List<int>();
+
+    bool held;
+    bool satVisible;
+    bool seenThisPass;
+    float respawnIn = -1f;
+    float spawnAge;
+    Vector3 topPos;                  // world position of the grab point while drifting
+    Vector3 velocity;
+    Vector3 trialTarget;
+    float spin;
+
+    Quaternion uprightRot;
+    Vector3 grabLocal;               // grab point offset from the satellite pivot (unrotated)
+    float reach = 1f, satRadius = 1f;
+
+    GameObject ghost;
+    Material ghostMat, lineMat;
+    LineRenderer ringFlat, ringFacing, approachLine, gripRing;
+
+    string message = "";
+    float messageUntil;
+    Rect calibRect;
+    GUIStyle big, mid, small, smallRight, button;
+    int styleHeight;
+
+    static SatelliteGame instance;
+
+    // ================= setup =================
+
+    void Awake()
+    {
+        if (instance != null && instance != this) { Destroy(this); return; }
+        instance = this;
+
+        if (!arm) arm = FindFirstObjectByType<ArmTest>();
+        if (!gripPoint) { var g = GameObject.Find("GripArea"); if (g) gripPoint = g.transform; }
+        if (!satellite) { var s = GameObject.Find("Satellite"); if (s) satellite = s.transform; }
+        if (!cam) cam = Camera.main;
+
+        if (!arm || !gripPoint || !satellite || !cam)
+        {
+            Debug.LogError($"SatelliteGame: missing reference (arm={arm}, gripPoint={gripPoint}, satellite={satellite}, camera={cam}). Drag them into the Inspector.");
+            enabled = false;
+            return;
+        }
+        if (transform.IsChildOf(satellite))
+            Debug.LogError("SatelliteGame: put this script on its own empty GameObject, not on the satellite.");
+
+        arm.showDebugGui = false;
+        arm.GripPressed += OnGripPressed;
+    }
+
+    void OnDestroy()
+    {
+        if (arm) arm.GripPressed -= OnGripPressed;
+        if (instance == this) instance = null;
+    }
+
+    void Start()
+    {
+        MeasureSatellite();
+        MeasureArm();
+        if (catchMargin <= 0f) catchMargin = Mathf.Max(0.01f, Mathf.Round(reach * 0.1f * 100f) / 100f);
+
+        lineMat = new Material(Shader.Find("Sprites/Default"));
+        ringFlat     = MakeLine("Outline Ring", 64, true);
+        ringFacing   = MakeLine("Outline Ring 2", 64, true);
+        approachLine = MakeLine("Approach Line", 2, false);
+        gripRing     = MakeLine("Grip Marker", 32, true);
+        BuildGhost();
+
+        EnterTitle();
+    }
+
+    void MeasureSatellite()
+    {
+        uprightRot = satellite.rotation;
+        Bounds b = new Bounds(satellite.position, Vector3.zero);
+        bool any = false;
+        foreach (var r in satellite.GetComponentsInChildren<Renderer>())
+        {
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        if (!any) b = new Bounds(satellite.position, Vector3.one);
+        satRadius = Mathf.Max(b.extents.magnitude, 0.01f);
+
+        Vector3 grabWorld = satelliteGrabPoint
+            ? satelliteGrabPoint.position
+            : new Vector3(b.center.x, b.max.y, b.center.z);   // top centre
+        grabLocal = Quaternion.Inverse(uprightRot) * (grabWorld - satellite.position);
+    }
+
+    void MeasureArm()
+    {
+        Transform p = arm.pitchJoint.segment, w = arm.wristJoint.segment;
+        float r = 0f;
+        if (p && w) r += Vector3.Distance(p.position, w.position);
+        if (w) r += Vector3.Distance(w.position, gripPoint.position);
+        else if (p) r += Vector3.Distance(p.position, gripPoint.position);
+        reach = r > 0.0001f ? r : 1f;
+    }
+
+    LineRenderer MakeLine(string name, int count, bool loop)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(transform, false);
+        var lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = true;
+        lr.loop = loop;
+        lr.positionCount = count;
+        lr.material = lineMat;
+        lr.widthMultiplier = reach * 0.006f;
+        lr.shadowCastingMode = ShadowCastingMode.Off;
+        lr.receiveShadows = false;
+        lr.numCapVertices = 2;
+        lr.enabled = false;
+        return lr;
+    }
+
+    void BuildGhost()
+    {
+        ghostMat = MakeTransparentMaterial();
+        ghost = Instantiate(satellite.gameObject);
+        ghost.name = "Satellite Outline (runtime)";
+        foreach (var c in ghost.GetComponentsInChildren<Collider>(true)) Destroy(c);
+        foreach (var rb in ghost.GetComponentsInChildren<Rigidbody>(true)) Destroy(rb);
+        foreach (var mb in ghost.GetComponentsInChildren<MonoBehaviour>(true)) Destroy(mb);
+        foreach (var r in ghost.GetComponentsInChildren<Renderer>(true))
+        {
+            var mats = new Material[r.sharedMaterials.Length];
+            for (int i = 0; i < mats.Length; i++) mats[i] = ghostMat;
+            r.sharedMaterials = mats;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+        }
+        ghost.SetActive(false);
+    }
+
+    static Material MakeTransparentMaterial()
+    {
+        Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
+        if (sh == null) return new Material(Shader.Find("Sprites/Default"));
+
+        var m = new Material(sh);
+        m.SetFloat("_Surface", 1f);   // transparent
+        m.SetFloat("_Blend", 0f);     // alpha
+        m.SetOverrideTag("RenderType", "Transparent");
+        m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        m.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        if (m.HasProperty("_SrcBlendAlpha")) m.SetFloat("_SrcBlendAlpha", (float)BlendMode.One);
+        if (m.HasProperty("_DstBlendAlpha")) m.SetFloat("_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
+        m.SetFloat("_ZWrite", 0f);
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.renderQueue = (int)RenderQueue.Transparent;
+        return m;
+    }
+
+    // ================= state changes =================
+
+    void SetState(State s) { state = s; stateTime = 0f; }
+
+    void EnterTitle()
+    {
+        SetState(State.Title);
+        round = 0;
+        times.Clear(); missedGrabs.Clear(); gotAway.Clear();
+        spin = 0f;
+        held = true;
+        ShowSatellite(true);
+    }
+
+    void BeginTrial()
+    {
+        SetState(State.Trial);
+        spin = 0f;
+        held = true;
+        ShowSatellite(true);
+        trialTarget = SampleReachablePoint(gripPoint.position, reach * 0.35f);
+        Flash("Move the satellite into the outline, then click to release it.");
+    }
+
+    void BeginCountdown()
+    {
+        SetState(State.Countdown);
+        held = false;
+        ShowSatellite(false);
+    }
+
+    void BeginRound()
+    {
+        SetState(State.Round);
+        roundTime = 0f;
+        timing = false;
+        missedGrabs.Add(0);
+        gotAway.Add(0);
+        Spawn();
+    }
+
+    void NextRound()
+    {
+        round++;
+        held = false;
+        if (round >= rounds) { ShowSatellite(false); SetState(State.Results); }
+        else BeginCountdown();
+    }
+
+    // ================= update =================
+
+    void Update()
+    {
+        float dt = Time.deltaTime;
+        stateTime += dt;
+        if (Pressed("c")) arm.Calibrate();
+
+        switch (state)
+        {
+            case State.Title:
+                if (Pressed("space")) BeginTrial();
+                break;
+            case State.TrialDone:
+                Drift(dt);
+                if (stateTime > 2.5f) BeginCountdown();
+                break;
+            case State.Countdown:
+                if (stateTime >= countdownSeconds) BeginRound();
+                break;
+            case State.Round:
+                UpdateRound(dt);
+                break;
+            case State.Caught:
+                if (stateTime >= caughtPause) NextRound();
+                break;
+            case State.Results:
+                if (Pressed("space") || Pressed("r")) EnterTitle();
+                break;
+        }
+        arm.gripClosed = held;
+    }
+
+    void UpdateRound(float dt)
+    {
+        if (timing) roundTime += dt;   // the clock keeps running through respawns
+
+        if (respawnIn > 0f)
+        {
+            respawnIn -= dt;
+            if (respawnIn <= 0f) Spawn();
+            return;
+        }
+
+        Drift(dt);
+        spawnAge += dt;
+
+        bool visible = InView(topPos, -0.1f);
+        if (visible && !seenThisPass) { seenThisPass = true; timing = true; }
+
+        bool leftView = seenThisPass && !visible;
+        bool neverArrived = spawnAge > entrySeconds * 4f;
+        if (leftView || neverArrived)
+        {
+            ShowSatellite(false);
+            gotAway[round]++;
+            respawnIn = respawnDelay;
+            Flash("It drifted away. Another one is coming, and the clock is still running!");
+        }
+    }
+
+    void Drift(float dt)
+    {
+        topPos += velocity * dt;
+        spin += spinDegreesPerSecond * dt;
+        PoseSatellite(topPos);
+    }
+
+    void Spawn()
+    {
+        // 1. A point the gripper can actually reach, inside the camera view
+        Vector3 catchPoint = SampleReachablePoint(gripPoint.position, reach * 0.3f);
+
+        // 2. A random direction that crosses the screen (not straight toward/away from the camera)
+        Vector3 dir = Vector3.right;
+        for (int i = 0; i < 60; i++)
+        {
+            dir = Random.onUnitSphere;
+            if (Mathf.Abs(Vector3.Dot(dir, cam.transform.forward)) < 0.5f) break;
+        }
+
+        // 3. Walk back along the path until just off screen
+        float step = Mathf.Max(reach * 0.05f, 0.001f), s = 0f, max = reach * 80f;
+        while (s < max && InView(catchPoint - dir * s, -0.05f)) s += step;
+        s += satRadius * 1.2f;
+
+        float speed = s / Mathf.Max(0.5f, entrySeconds) * Mathf.Pow(speedScalePerRound, round);
+        velocity = dir * speed;
+        topPos = catchPoint - dir * s;
+        spin = Random.Range(0f, 360f);
+        spawnAge = 0f;
+        seenThisPass = false;
+        respawnIn = -1f;
+        ShowSatellite(true);
+        PoseSatellite(topPos);
+    }
+
+    // ================= grabbing / releasing =================
+
+    void OnGripPressed(Vector2 mouse)
+    {
+        // Ignore clicks on the Calibrate button
+        if (mouse.x >= 0f && calibRect.Contains(new Vector2(mouse.x, Screen.height - mouse.y))) return;
+
+        float m = Margin();
+        switch (state)
+        {
+            case State.Trial:
+            {
+                float d = Vector3.Distance(gripPoint.position, trialTarget);
+                if (d <= m)
+                {
+                    held = false;
+                    topPos = gripPoint.position;
+                    velocity = (Vector3.up * 0.6f + Random.insideUnitSphere * 0.3f).normalized * reach * 0.12f;
+                    SetState(State.TrialDone);
+                    Flash("Perfect release! Get ready for Round 1.");
+                }
+                else Flash($"Not lined up yet: {d:0.00} away (needs {m:0.00}). Keep moving into the outline.");
+                break;
+            }
+            case State.Round:
+            {
+                if (!satVisible || respawnIn > 0f) return;
+                if (InCatchZone(out float horiz, out float vert))
+                {
+                    held = true;
+                    timing = false;
+                    times.Add(roundTime);
+                    SetState(State.Caught);
+                    Flash($"CAUGHT! Round {round + 1}: {roundTime:0.00} s");
+                }
+                else
+                {
+                    missedGrabs[round]++;
+                    Flash(vert < -m * belowTolerance ? "Missed! Get ABOVE the satellite." : "Missed! Line up over the glowing ring.");
+                }
+                break;
+            }
+        }
+    }
+
+    // Gripper is within the margin sideways and above (or barely below) the grab point.
+    bool InCatchZone(out float horiz, out float vert)
+    {
+        Vector3 off = gripPoint.position - topPos;
+        vert = Vector3.Dot(off, Vector3.up);
+        horiz = new Vector3(off.x, 0f, off.z).magnitude;
+        float m = Margin();
+        return horiz <= m && vert >= -m * belowTolerance && vert <= m * 2f;
+    }
+
+    float Margin()
+    {
+        if (state == State.Title || state == State.Trial) return catchMargin * trialMarginMultiplier;
+        return catchMargin * Mathf.Pow(marginScalePerRound, Mathf.Min(round, Mathf.Max(0, rounds - 1)));
+    }
+
+    // ================= helpers =================
+
+    // Tries random joint angles and returns a grip position that is on screen.
+    Vector3 SampleReachablePoint(Vector3 avoid, float minDist)
+    {
+        for (int i = 0; i < 400; i++)
+        {
+            float y = Mathf.Lerp(Mathf.Max(arm.yawJoint.min, -170f), Mathf.Min(arm.yawJoint.max, 170f), Random.value);
+            float p = Mathf.Lerp(arm.pitchJoint.min, arm.pitchJoint.max, Random.Range(0.1f, 0.9f));
+            float w = Mathf.Lerp(arm.wristJoint.min, arm.wristJoint.max, Random.Range(0.2f, 0.8f));
+            Vector3 g = arm.GripPositionAt(gripPoint, y, p, w);
+            Vector3 body = g - uprightRot * grabLocal;   // satellite pivot if its grab point sat here
+
+            if (!InView(g, 0.18f, 0.1f) || !InView(body, 0.1f)) continue;
+            if (Vector3.Distance(g, avoid) < minDist) continue;
+            return g;
+        }
+        Debug.LogWarning("SatelliteGame: couldn't find a reachable spot on screen. Move the camera so more of the arm's reach is visible.");
+        return gripPoint.position;
+    }
+
+    bool InView(Vector3 p, float pad, float extraTop = 0f)
+    {
+        Vector3 v = cam.WorldToViewportPoint(p);
+        return v.z > cam.nearClipPlane && v.x > pad && v.x < 1f - pad && v.y > pad && v.y < 1f - pad - extraTop;
+    }
+
+    Quaternion SatRot() => Quaternion.AngleAxis(spin, Vector3.up) * uprightRot;
+
+    void PoseSatellite(Vector3 grabWorld)
+    {
+        satellite.rotation = SatRot();
+        satellite.position = grabWorld - satellite.rotation * grabLocal;
+    }
+
+    void ShowSatellite(bool on)
+    {
+        satVisible = on;
+        satellite.gameObject.SetActive(on);
+    }
+
+    void Flash(string msg) { 
+        message = msg; 
+        messageUntil = Time.time + 3f; 
+    }
+
+    static bool Pressed(string key)
+    {
+#if ENABLE_INPUT_SYSTEM
+        var kb = UnityEngine.InputSystem.Keyboard.current;
+        if (kb == null) return false;
+        switch (key)
+        {
+            case "space": return kb.spaceKey.wasPressedThisFrame;
+            case "c": return kb.cKey.wasPressedThisFrame;
+            case "r": return kb.rKey.wasPressedThisFrame;
+        }
+        return false;
+#else
+        return Input.GetKeyDown(key);
+#endif
+    }
+
+    // ================= visuals =================
+
+    void LateUpdate()   // after ArmTest has moved the joints this frame
+    {
+        if (held) PoseSatellite(gripPoint.position);
+
+        float m = Margin();
+        float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 4f);
+        bool showTrial = state == State.Trial;
+        bool showRound = state == State.Round && satVisible && respawnIn <= 0f;
+
+        ghost.SetActive(showTrial);
+        ringFlat.enabled = showTrial || showRound;
+        ringFacing.enabled = showTrial;
+        approachLine.enabled = showRound;
+        gripRing.enabled = state == State.Title || state == State.Trial || state == State.Round;
+
+        if (showTrial)
+        {
+            bool inside = Vector3.Distance(gripPoint.position, trialTarget) <= m;
+            Color c = inside ? readyColor : outlineColor;
+            ghost.transform.rotation = uprightRot;
+            ghost.transform.position = trialTarget - uprightRot * grabLocal;
+            SetGhostColor(new Color(c.r, c.g, c.b, 0.2f + 0.2f * pulse));
+            DrawRing(ringFlat, trialTarget, Vector3.up, m, c);
+            DrawRing(ringFacing, trialTarget, -cam.transform.forward, m, c);
+        }
+
+        if (showRound)
+        {
+            bool ok = InCatchZone(out _, out _);
+            Color c = ok ? readyColor : new Color(outlineColor.r, outlineColor.g, outlineColor.b, 0.5f + 0.5f * pulse);
+            DrawRing(ringFlat, topPos, Vector3.up, m, c);
+            approachLine.SetPosition(0, topPos);
+            approachLine.SetPosition(1, topPos + Vector3.up * m * 2f);
+            approachLine.startColor = c;
+            approachLine.endColor = new Color(c.r, c.g, c.b, 0f);
+        }
+
+        if (gripRing.enabled) DrawRing(gripRing, gripPoint.position, -cam.transform.forward, m * 0.2f, Color.white);
+    }
+
+    void DrawRing(LineRenderer lr, Vector3 center, Vector3 normal, float radius, Color col)
+    {
+        Vector3 a = Vector3.Cross(normal, Vector3.up);
+        if (a.sqrMagnitude < 1e-4f) a = Vector3.Cross(normal, Vector3.right);
+        a.Normalize();
+        Vector3 b = Vector3.Cross(normal, a).normalized;
+        int n = lr.positionCount;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)n * Mathf.PI * 2f;
+            lr.SetPosition(i, center + (a * Mathf.Cos(t) + b * Mathf.Sin(t)) * radius);
+        }
+        lr.startColor = lr.endColor = col;
+    }
+
+    void SetGhostColor(Color c)
+    {
+        if (ghostMat.HasProperty("_BaseColor")) ghostMat.SetColor("_BaseColor", c);
+        if (ghostMat.HasProperty("_Color")) ghostMat.SetColor("_Color", c);
+    }
+
+    // ================= UI =================
+
+    void MakeStyles()
+    {
+        styleHeight = Screen.height;
+        float s = Screen.height / 1080f;
+        big = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(64 * s), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, richText = true };
+        mid = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(30 * s), alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
+        small = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(24 * s), alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true };
+        smallRight = new GUIStyle(small) { alignment = TextAnchor.UpperRight };
+        button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(26 * s) };
+    }
+
+    void OnGUI()
+    {
+        if (big == null || styleHeight != Screen.height) MakeStyles();
+        float s = Screen.height / 1080f, W = Screen.width, H = Screen.height;
+
+        // Top-right: phone status + calibrate
+        calibRect = new Rect(W - 240 * s, 20 * s, 220 * s, 50 * s);
+        if (GUI.Button(calibRect, "Calibrate (C)", button)) arm.Calibrate();
+        string phone = arm.PhoneConnected ? "<color=#7f7>Phone connected</color>" : $"<color=#fa6>{arm.Status}</color>";
+        GUI.Label(new Rect(W - 720 * s, 80 * s, 700 * s, 40 * s), phone, smallRight);
+
+        switch (state)
+        {
+            case State.Title: DrawTitle(s, W, H); break;
+
+            case State.Trial:
+            {
+                float d = Vector3.Distance(gripPoint.position, trialTarget), m = Margin();
+                string col = d <= m ? "#7f7" : "#fff";
+                DrawHeader(s, W, "TRIAL", "Line the satellite up with the glowing outline, then click to release");
+                GUI.Label(new Rect(0, 190 * s, W, 40 * s), $"<color={col}>Distance {d:0.00}  /  needs {m:0.00}</color>", mid);
+                break;
+            }
+
+            case State.TrialDone:
+                DrawHeader(s, W, "TRIAL COMPLETE", "Real rounds are next. Grab each satellite from above its glowing ring");
+                break;
+
+            case State.Countdown:
+            {
+                int n = Mathf.CeilToInt(countdownSeconds - stateTime);
+                GUI.Label(new Rect(0, H * 0.3f, W, 100 * s), $"ROUND {round + 1} / {rounds}", big);
+                GUI.Label(new Rect(0, H * 0.3f + 110 * s, W, 140 * s), $"<size={Mathf.RoundToInt(110 * s)}>{Mathf.Max(n, 1)}</size>", big);
+                break;
+            }
+
+            case State.Round:
+            {
+                DrawHeader(s, W, $"ROUND {round + 1} / {rounds}    {roundTime:0.00} s",
+                    timing ? "Get the gripper ABOVE the glowing ring and click to grab" : "Incoming satellite...");
+                if (satVisible && respawnIn <= 0f)
+                {
+                    bool ok = InCatchZone(out float h, out float v);
+                    string col = ok ? "#7f7" : "#fff";
+                    string above = v >= -Margin() * belowTolerance ? "above: OK" : "too low";
+                    GUI.Label(new Rect(0, 190 * s, W, 40 * s),
+                        $"<color={col}>Side {h:0.00} / {Margin():0.00}    Height {v:+0.00;-0.00}  ({above})</color>", mid);
+                }
+                break;
+            }
+
+            case State.Caught:
+                DrawHeader(s, W, $"CAUGHT!  {times[times.Count - 1]:0.00} s", round + 1 < rounds ? "Next satellite incoming..." : "Final satellite secured!");
+                break;
+
+            case State.Results: DrawResults(s, W, H); break;
+        }
+
+        if (Time.time < messageUntil && state != State.Title && state != State.Results)
+            GUI.Label(new Rect(0, H - 170 * s, W, 60 * s), message, mid);
+
+        if (state == State.Trial || state == State.Round)
+            GUI.Label(new Rect(20 * s, H - 60 * s, W, 40 * s),
+                "Phone: aim the arm    Mouse up/down: wrist    Click / phone Grab: release & grab", small);
+    }
+
+    void DrawHeader(float s, float W, string title, string sub)
+    {
+        GUI.Label(new Rect(0, 20 * s, W, 90 * s), title, big);
+        GUI.Label(new Rect(W * 0.15f, 110 * s, W * 0.7f, 70 * s), sub, mid);
+    }
+
+    void DrawTitle(float s, float W, float H)
+    {
+        Rect r = new Rect(W / 2 - 520 * s, H / 2 - 330 * s, 1040 * s, 660 * s);
+        GUI.Box(r, GUIContent.none);
+        GUILayout.BeginArea(new Rect(r.x + 40 * s, r.y + 30 * s, r.width - 80 * s, r.height - 60 * s));
+        GUILayout.Label("SATELLITE CATCH", big);
+        GUILayout.Space(10 * s);
+        GUILayout.Label(
+            "<b>Controls</b>\n" +
+            "• Phone: turn left/right and tilt up/down to aim the arm\n" +
+            "• Mouse up/down: bend the wrist\n" +
+            "• Click (or the phone's Grab button): release or grab\n\n" +
+            "<b>How to play</b>\n" +
+            "1. Trial: the arm is holding a satellite. Release it inside the glowing outline.\n" +
+            $"2. Then {rounds} timed rounds: a satellite drifts past. Get the gripper ABOVE its glowing ring and grab it.\n" +
+            "3. If one drifts off screen, another comes, but the clock keeps running. Lowest times win!", small);
+        GUILayout.FlexibleSpace();
+        if (!arm.PhoneConnected) GUILayout.Label("<color=#fa6>Phone not connected yet: start the relay and open the controller page.</color>", small);
+        GUILayout.Label("Hold the phone pointing the way the arm points, then press Calibrate.", small);
+        GUILayout.Space(10 * s);
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Calibrate (C)", button, GUILayout.Height(60 * s))) arm.Calibrate();
+        if (GUILayout.Button("Start trial (Space)", button, GUILayout.Height(60 * s))) BeginTrial();
+        GUILayout.EndHorizontal();
+        GUILayout.EndArea();
+    }
+
+    void DrawResults(float s, float W, float H)
+    {
+        Rect r = new Rect(W / 2 - 450 * s, H / 2 - 320 * s, 900 * s, 640 * s);
+        GUI.Box(r, GUIContent.none);
+        GUILayout.BeginArea(new Rect(r.x + 40 * s, r.y + 30 * s, r.width - 80 * s, r.height - 60 * s));
+        GUILayout.Label("MISSION COMPLETE", big);
+        GUILayout.Space(20 * s);
+
+        float total = 0f, best = float.MaxValue;
+        int bestIndex = 0;
+        for (int i = 0; i < times.Count; i++)
+        {
+            total += times[i];
+            if (times[i] < best) { best = times[i]; bestIndex = i; }
+        }
+        for (int i = 0; i < times.Count; i++)
+        {
+            string star = i == bestIndex ? "  <color=#ff7>BEST</color>" : "";
+            GUILayout.Label($"Round {i + 1}:   <b>{times[i]:0.00} s</b>   " +
+                            $"<color=#aaa>({missedGrabs[i]} missed grabs, {gotAway[i]} got away)</color>{star}", mid);
+        }
+        GUILayout.Space(20 * s);
+        GUILayout.Label($"<b>Total: {total:0.00} s</b>", mid);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Play again (Space)", button, GUILayout.Height(60 * s))) EnterTitle();
+        GUILayout.EndArea();
+    }
+}
