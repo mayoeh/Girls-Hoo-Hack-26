@@ -688,6 +688,8 @@ MonoBehaviour:
   speedScalePerRound: 1.2
   belowTolerance: 0.3
   spinDegreesPerSecond: 10
+  titleFont: {fileID: 12800000, guid: a8e0f5d10192578419383d48909920a0, type: 3}
+  bodyFont: {fileID: 12800000, guid: 508da929ed1857b41b319ce38aacaa33, type: 3}
   outlineColor: {r: 0.3, g: 0.85, b: 1, a: 1}
   readyColor: {r: 0.3, g: 1, b: 0.45, a: 1}
 --- !u!4 &547477158
