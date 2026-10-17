@@ -14,10 +14,13 @@ $target = "$User@$Server"
 
 Write-Host "==> Creating /opt/arm-relay on $Server"
 ssh $target "mkdir -p /opt/arm-relay/deploy"
+if ($LASTEXITCODE -ne 0) { throw "Could not connect to $Server - check the IP and password." }
 
 Write-Host "==> Uploading files"
 scp server.js controller.html package.json package-lock.json "${target}:/opt/arm-relay/"
+if ($LASTEXITCODE -ne 0) { throw "Upload of app files failed - check the password and try again." }
 scp deploy/setup.sh "${target}:/opt/arm-relay/deploy/"
+if ($LASTEXITCODE -ne 0) { throw "Upload of setup.sh failed - check the password and try again." }
 
 Write-Host "==> Running setup on the server"
 ssh $target "sed -i 's/\r$//' /opt/arm-relay/deploy/setup.sh && bash /opt/arm-relay/deploy/setup.sh $Domain"
