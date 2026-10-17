@@ -17,7 +17,7 @@ ssh $target "mkdir -p /opt/arm-relay/deploy"
 if ($LASTEXITCODE -ne 0) { throw "Could not connect to $Server - check the IP and password." }
 
 Write-Host "==> Uploading files"
-scp server.js controller.html package.json package-lock.json "${target}:/opt/arm-relay/"
+scp server.js controller.html AstroSpace.ttf stars.jpg package.json package-lock.json "${target}:/opt/arm-relay/"
 if ($LASTEXITCODE -ne 0) { throw "Upload of app files failed - check the password and try again." }
 scp deploy/setup.sh "${target}:/opt/arm-relay/deploy/"
 if ($LASTEXITCODE -ne 0) { throw "Upload of setup.sh failed - check the password and try again." }

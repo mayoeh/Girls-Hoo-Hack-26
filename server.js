@@ -12,12 +12,18 @@ const { WebSocketServer } = require('ws');
 const PORT = Number(process.env.PORT) || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 
+// Files the phone page loads (font + star background)
+const ASSETS = { '/AstroSpace.ttf': 'font/ttf', '/stars.jpg': 'image/jpeg' };
+
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     const counts = { phone: 0, game: 0 };
     for (const c of wss.clients) counts[c.role === 'phone' ? 'phone' : 'game']++;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, ...counts }));
+  } else if (ASSETS[req.url]) {
+    res.writeHead(200, { 'Content-Type': ASSETS[req.url], 'Cache-Control': 'public, max-age=86400' });
+    fs.createReadStream(path.join(__dirname, req.url.slice(1))).pipe(res);
   } else if (req.url === '/' || req.url.startsWith('/controller') || req.url.startsWith('/?')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'controller.html')).pipe(res);

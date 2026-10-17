@@ -28,3 +28,27 @@ Select the object with ArmTest in the RobotArmGame scene and set **Server Url** 
 - https://YOUR-DOMAIN/health -> shows how many phones and games are connected.
 - Logs: `ssh root@IP journalctl -u arm-relay -f`
 - Restart: `ssh root@IP systemctl restart arm-relay`
+
+---
+
+# Hosting the Shockwave server on the same Vultr box
+
+Unity (FeedbackCoach) -> https://149-28-227-46.sslip.io/api/shockwave/feedback -> Caddy -> Shockwave server.js (port 3000, always on)
+
+The arm relay keeps everything else on the domain (/controller, /health, the websocket). Both run as services, so they start on boot and restart if they crash. You never need to run `node server.js` on your laptop.
+
+## Before the first deploy
+- The server lives in `Server/shockwave-feedback` (server.js + package.json, no npm packages needed).
+- Its secrets (Gemini key now, Tiger Data connection string later) go in `Server/shockwave-feedback/.env`. The deploy copies it to the server as `/etc/shockwave.env`. It's ignored by git.
+
+## Deploy (PowerShell, in the project folder)
+    .\deploy\deploy-shockwave.ps1
+Enter the root password when asked. Re-run it whenever you change the Shockwave server.
+
+## Unity
+FeedbackCoach already points at `https://149-28-227-46.sslip.io/api/shockwave/feedback`. For local testing, change its Endpoint to `http://localhost:3000/api/shockwave/feedback`.
+
+## Check / debug
+- https://149-28-227-46.sslip.io/api/shockwave/health -> `hasKey: true` means the Gemini key made it.
+- Logs (every tip is printed): `ssh root@149.28.227.46 journalctl -u shockwave -f`
+- Restart: `ssh root@149.28.227.46 systemctl restart shockwave`

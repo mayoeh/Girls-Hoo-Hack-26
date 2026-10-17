@@ -57,8 +57,11 @@ systemctl enable --now arm-relay
 systemctl restart arm-relay
 
 echo "==> Configuring Caddy for $DOMAIN"
+mkdir -p /etc/caddy/routes
 cat > /etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
+    # Other games add their routes here (e.g. Shockwave -> /api/shockwave/*)
+    import /etc/caddy/routes/*.caddy
     reverse_proxy 127.0.0.1:8080
 }
 CADDY
