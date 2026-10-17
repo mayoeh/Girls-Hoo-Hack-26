@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>Arm Controller</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0b1020; color: #eee; margin: 0; padding: 16px; text-align: center; touch-action: manipulation; user-select: none; }
-    button { width: 100%; font-size: 22px; padding: 20px; margin: 8px 0; border: 0; border-radius: 12px; color: #fff; }
+    @font-face { font-family: 'AstroSpace'; src: url('/AstroSpace.ttf') format('truetype'); font-display: swap; }
+    body { font-family: 'AstroSpace', system-ui, sans-serif; letter-spacing: .04em; background: #000 url('/stars.jpg') center / cover fixed; min-height: 100vh; box-sizing: border-box; color: #eee; margin: 0; padding: 16px; text-shadow: 0 1px 4px #000; text-align: center; touch-action: manipulation; user-select: none; }
+    button { width: 100%; font-family: inherit; letter-spacing: inherit; font-size: 22px; padding: 20px; margin: 8px 0; border: 0; border-radius: 12px; color: #fff; }
     #start { background: #4c8bf5; }
     #cal { background: #555; }
-    #snare { background: #e0533d; padding: 48px 20px; font-weight: 700; }
     #status { font-size: 15px; margin: 8px 0 12px; opacity: .85; }
-    #dbg { font-family: monospace; font-size: 13px; opacity: .7; }
+    #dbg { font-family: monospace; font-size: 13px; opacity: .7; letter-spacing: 0; }
   </style>
 </head>
 <body>
@@ -19,7 +19,6 @@
   <div id="status">Tap Start</div>
   <button id="start">Start</button>
   <button id="cal">Calibrate (hold phone neutral)</button>
-  <button id="snare">Grab</button>
   <div id="dbg"></div>
 
 <script>
@@ -88,7 +87,6 @@
 
   document.getElementById('start').addEventListener('click', start);
   document.getElementById('cal').addEventListener('click', () => { cal = true; navigator.vibrate?.(30); });
-  document.getElementById('snare').addEventListener('click', () => { snare = true; navigator.vibrate?.(60); });
 </script>
 </body>
 </html>

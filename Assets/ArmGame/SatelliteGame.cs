@@ -38,6 +38,12 @@ public class SatelliteGame : MonoBehaviour
     [Range(0f, 1f)] public float belowTolerance = 0.3f;
     public float spinDegreesPerSecond = 10f;
 
+    [Header("Fonts (auto-filled from Assets/Fonts)")]
+    [Tooltip("Titles and big headings")]
+    public Font titleFont;
+    [Tooltip("All regular text and buttons")]
+    public Font bodyFont;
+
     [Header("Colors")]
     public Color outlineColor = new Color(0.3f, 0.85f, 1f, 1f);
     public Color readyColor = new Color(0.3f, 1f, 0.45f, 1f);
@@ -72,8 +78,7 @@ public class SatelliteGame : MonoBehaviour
 
     string message = "";
     float messageUntil;
-    Rect calibRect;
-    GUIStyle big, mid, small, smallRight, button;
+    GUIStyle big, mid, small, smallRight, button, instructions;
     int styleHeight;
 
     static SatelliteGame instance;
@@ -315,7 +320,7 @@ public class SatelliteGame : MonoBehaviour
             ShowSatellite(false);
             gotAway[round]++;
             respawnIn = respawnDelay;
-            Flash("It drifted away. Another one is coming, and the clock is still running!");
+            Flash("It drifted away. Another one is coming!");
         }
     }
 
@@ -328,10 +333,8 @@ public class SatelliteGame : MonoBehaviour
 
     void Spawn()
     {
-        // 1. A point the gripper can actually reach, inside the camera view
         Vector3 catchPoint = SampleReachablePoint(gripPoint.position, reach * 0.3f);
 
-        // 2. A random direction that crosses the screen (not straight toward/away from the camera)
         Vector3 dir = Vector3.right;
         for (int i = 0; i < 60; i++)
         {
@@ -359,8 +362,6 @@ public class SatelliteGame : MonoBehaviour
 
     void OnGripPressed(Vector2 mouse)
     {
-        // Ignore clicks on the Calibrate button
-        if (mouse.x >= 0f && calibRect.Contains(new Vector2(mouse.x, Screen.height - mouse.y))) return;
 
         float m = Margin();
         switch (state)
@@ -544,15 +545,25 @@ public class SatelliteGame : MonoBehaviour
 
     // ================= UI =================
 
+#if UNITY_EDITOR
+    void OnValidate()
+    {
+        if (!titleFont) titleFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/AstroSpace.ttf");
+        if (!bodyFont) bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/ELEGANT TYPEWRITER Regular.ttf");
+        big = null;   // rebuild styles if fonts change in Play mode
+    }
+#endif
+
     void MakeStyles()
     {
         styleHeight = Screen.height;
         float s = Screen.height / 1080f;
-        big = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(64 * s), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, richText = true };
-        mid = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(30 * s), alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
-        small = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(24 * s), alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true };
+        big = new GUIStyle(GUI.skin.label) { font = titleFont, fontSize = Mathf.RoundToInt(64 * s), alignment = TextAnchor.MiddleCenter, fontStyle = titleFont ? FontStyle.Normal : FontStyle.Bold, richText = true };
+        mid = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(30 * s), alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
+        small = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(24 * s), alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true };
         smallRight = new GUIStyle(small) { alignment = TextAnchor.UpperRight };
-        button = new GUIStyle(GUI.skin.button) { fontSize = Mathf.RoundToInt(26 * s) };
+        instructions = new GUIStyle(small) { fontSize = Mathf.RoundToInt(34 * s) };
+        button = new GUIStyle(GUI.skin.button) { font = bodyFont, fontSize = Mathf.RoundToInt(26 * s) };
     }
 
     void OnGUI()
@@ -560,11 +571,9 @@ public class SatelliteGame : MonoBehaviour
         if (big == null || styleHeight != Screen.height) MakeStyles();
         float s = Screen.height / 1080f, W = Screen.width, H = Screen.height;
 
-        // Top-right: phone status + calibrate
-        calibRect = new Rect(W - 240 * s, 20 * s, 220 * s, 50 * s);
-        if (GUI.Button(calibRect, "Calibrate (C)", button)) arm.Calibrate();
+        // Top-right: phone status
         string phone = arm.PhoneConnected ? "<color=#7f7>Phone connected</color>" : $"<color=#fa6>{arm.Status}</color>";
-        GUI.Label(new Rect(W - 720 * s, 80 * s, 700 * s, 40 * s), phone, smallRight);
+        GUI.Label(new Rect(W - 720 * s, 20 * s, 700 * s, 40 * s), phone, smallRight);
 
         switch (state)
         {
@@ -572,10 +581,7 @@ public class SatelliteGame : MonoBehaviour
 
             case State.Trial:
             {
-                float d = Vector3.Distance(gripPoint.position, trialTarget), m = Margin();
-                string col = d <= m ? "#7f7" : "#fff";
                 DrawHeader(s, W, "TRIAL", "Line the satellite up with the glowing outline, then click to release");
-                GUI.Label(new Rect(0, 190 * s, W, 40 * s), $"<color={col}>Distance {d:0.00}  /  needs {m:0.00}</color>", mid);
                 break;
             }
 
@@ -593,16 +599,9 @@ public class SatelliteGame : MonoBehaviour
 
             case State.Round:
             {
-                DrawHeader(s, W, $"ROUND {round + 1} / {rounds}    {roundTime:0.00} s",
+                // Timer stays hidden while playing; the time is shown once the satellite is caught.
+                DrawHeader(s, W, $"ROUND {round + 1} / {rounds}",
                     timing ? "Get the gripper ABOVE the glowing ring and click to grab" : "Incoming satellite...");
-                if (satVisible && respawnIn <= 0f)
-                {
-                    bool ok = InCatchZone(out float h, out float v);
-                    string col = ok ? "#7f7" : "#fff";
-                    string above = v >= -Margin() * belowTolerance ? "above: OK" : "too low";
-                    GUI.Label(new Rect(0, 190 * s, W, 40 * s),
-                        $"<color={col}>Side {h:0.00} / {Margin():0.00}    Height {v:+0.00;-0.00}  ({above})</color>", mid);
-                }
                 break;
             }
 
@@ -618,7 +617,7 @@ public class SatelliteGame : MonoBehaviour
 
         if (state == State.Trial || state == State.Round)
             GUI.Label(new Rect(20 * s, H - 60 * s, W, 40 * s),
-                "Phone: aim the arm    Mouse up/down: wrist    Click / phone Grab: release & grab", small);
+                "Click: release & grab", small);
     }
 
     void DrawHeader(float s, float W, string title, string sub)
@@ -629,7 +628,7 @@ public class SatelliteGame : MonoBehaviour
 
     void DrawTitle(float s, float W, float H)
     {
-        Rect r = new Rect(W / 2 - 520 * s, H / 2 - 330 * s, 1040 * s, 660 * s);
+        Rect r = new Rect(W / 2 - 700 * s, H / 2 - 450 * s, 1400 * s, 900 * s);
         GUI.Box(r, GUIContent.none);
         GUILayout.BeginArea(new Rect(r.x + 40 * s, r.y + 30 * s, r.width - 80 * s, r.height - 60 * s));
         GUILayout.Label("SATELLITE CATCH", big);
@@ -642,15 +641,12 @@ public class SatelliteGame : MonoBehaviour
             "<b>How to play</b>\n" +
             "1. Trial: the arm is holding a satellite. Release it inside the glowing outline.\n" +
             $"2. Then {rounds} timed rounds: a satellite drifts past. Get the gripper ABOVE its glowing ring and grab it.\n" +
-            "3. If one drifts off screen, another comes, but the clock keeps running. Lowest times win!", small);
+            "3. If one drifts off screen, another comes, but the clock keeps running. Lowest times win!", instructions);
         GUILayout.FlexibleSpace();
-        if (!arm.PhoneConnected) GUILayout.Label("<color=#fa6>Phone not connected yet: start the relay and open the controller page.</color>", small);
-        GUILayout.Label("Hold the phone pointing the way the arm points, then press Calibrate.", small);
+        if (!arm.PhoneConnected) GUILayout.Label("<color=#fa6>Phone not connected yet</color>", instructions);
+        GUILayout.Label("Hold the phone flat and pointing straight ahead, then tap Calibrate on the phone.", instructions);
         GUILayout.Space(10 * s);
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Calibrate (C)", button, GUILayout.Height(60 * s))) arm.Calibrate();
-        if (GUILayout.Button("Start trial (Space)", button, GUILayout.Height(60 * s))) BeginTrial();
-        GUILayout.EndHorizontal();
+        if (GUILayout.Button("Start trial (Space)", button, GUILayout.Height(70 * s))) BeginTrial();
         GUILayout.EndArea();
     }
 
