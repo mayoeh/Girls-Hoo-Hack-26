@@ -58,7 +58,8 @@ public class TestBench : MonoBehaviour
     Texture2D white;
 
     // Saving a design always sends it to the tunnel: you can only go back to modeling after a run.
-    bool CanFire => State == RunState.Ready || State == RunState.Results;
+    bool CanFire => (State == RunState.Ready || State == RunState.Results) && !resultsOpen;
+    bool resultsOpen;   // the results pop-up: it must be closed before you can run again or go back to modeling
     bool CanLeave => State == RunState.Results;
 
     // Fill in anything not assigned in the Inspector, so the modeling panels are always hidden while testing.
@@ -80,7 +81,9 @@ public class TestBench : MonoBehaviour
     void Update()
     {
         var kb = Keyboard.current;
-        if (kb != null && CurrentMode == Mode.Test && CanFire && kb.spaceKey.wasPressedThisFrame) Fire();
+        if (kb != null && CurrentMode == Mode.Test && resultsOpen &&
+            (kb.escapeKey.wasPressedThisFrame || kb.enterKey.wasPressedThisFrame)) resultsOpen = false;
+        else if (kb != null && CurrentMode == Mode.Test && CanFire && kb.spaceKey.wasPressedThisFrame) Fire();
         if (CurrentMode != Mode.Test) return;
 
         Step(Time.deltaTime);
@@ -113,6 +116,7 @@ public class TestBench : MonoBehaviour
     void EnterTest()
     {
         CurrentMode = Mode.Test;
+        resultsOpen = false;
         UIPanels.Open("tunnel");   // the tunnel panel always starts open when a test begins
         State = RunState.Ready;
         metrics = ShapeMetrics.Measure(rocket);
@@ -192,7 +196,7 @@ public class TestBench : MonoBehaviour
                 float k = Mathf.Clamp01(stateTime / spinDownTime);
                 speed01 = (1f - k) * (1f - k);
                 mach = runMach * speed01;
-                if (k >= 1f) Enter(RunState.Results);
+                if (k >= 1f) { Enter(RunState.Results); resultsOpen = true; }
                 break;
             }
             default:
@@ -319,9 +323,11 @@ public class TestBench : MonoBehaviour
 
         if (CurrentMode == Mode.Test)
         {
+            GUI.enabled = !resultsOpen;          // the pop-up blocks everything behind it
             DrawTunnelPanel();
-            if (State == RunState.Results) DrawResults();
             DrawTrialTable();
+            GUI.enabled = true;
+            if (State == RunState.Results && resultsOpen) DrawResultsPopup(e);
 
             if (flash > 0f && e.type == EventType.Repaint)
             {
@@ -344,13 +350,10 @@ public class TestBench : MonoBehaviour
         }
     }
 
-    // Wide, short bar across the top, so the model in the middle stays visible.
-    // Leaves room on the right for the results panel.
+    // Short bar across the full width of the top, so the model in the middle stays visible.
     void DrawTunnelPanel()
     {
-        const float resultsWidth = 460f;
-        float w = Mathf.Clamp(Screen.width - resultsWidth - 36f, 560f, 1000f);
-        GUILayout.BeginArea(new Rect(12f, 12f, w, Screen.height * 0.5f));
+        GUILayout.BeginArea(new Rect(12f, 12f, Screen.width - 24f, Screen.height * 0.5f));
         GUILayout.BeginVertical(panel);
 
         if (!UIPanels.Header("tunnel", "WIND TUNNEL", head))
@@ -363,7 +366,7 @@ public class TestBench : MonoBehaviour
 
         GUILayout.BeginHorizontal();
 
-        // 1. Live speed and status
+        // Live speed and status
         GUILayout.BeginVertical(GUILayout.Width(150f));
         GUILayout.Label($"M {mach:0.00}", big);
         GUILayout.Label(StateText(), note);
@@ -371,27 +374,35 @@ public class TestBench : MonoBehaviour
         GUILayout.EndVertical();
         GUILayout.Space(12f);
 
-        // 2. Speed slider, fire button, run progress
-        GUILayout.BeginVertical(GUILayout.MinWidth(200f), GUILayout.MaxWidth(280f));
+        // Speed slider, fire button, run progress
+        bool blocked = !GUI.enabled;   // true while the results pop-up is open
+        GUILayout.BeginVertical(GUILayout.MinWidth(200f), GUILayout.MaxWidth(320f));
         GUI.enabled = CanFire;
         GUILayout.Label($"Target Mach   {targetMach:0.00}", text);
         targetMach = Mathf.Round(GUILayout.HorizontalSlider(targetMach, 1.6f, 2.2f) * 20f) / 20f;   // steps of 0.05
         GUILayout.Space(8f);
         if (GUILayout.Button(State == RunState.Results ? "RUN AGAIN  [Space]" : "FIRE  [Space]", fireButton, GUILayout.Height(40f)))
             pending = Fire;
-        GUI.enabled = true;
+        GUI.enabled = !blocked;
+        if (State == RunState.Results)
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Show results", button)) pending = () => resultsOpen = true;
+            if (GUILayout.Button("Back to modeling", button)) pending = ExitTest;
+            GUILayout.EndHorizontal();
+        }
         GUILayout.Space(6f);
         Rect progress = GUILayoutUtility.GetRect(180f, 8f, GUILayout.ExpandWidth(true));
         if (Event.current.type == EventType.Repaint) DrawProgress(progress);
         GUILayout.EndVertical();
         GUILayout.Space(16f);
 
-        // 3. What the colors mean
-        GUILayout.BeginVertical(GUILayout.MinWidth(180f));
+        // Color breakdowns
+        GUILayout.BeginVertical(GUILayout.MinWidth(180f), GUILayout.MaxWidth(560f));
         GUILayout.Label("WHAT YOU'RE SEEING", head);
         LegendRow(flow != null ? flow.laminar : new Color(0.35f, 0.75f, 1f), "Blue: smooth air, flowing in neat layers along the model");
         LegendRow(flow != null ? flow.turbulent : new Color(1f, 0.4f, 0.15f), "Orange: rough air that churns and swirls. Keep it as far back as you can");
-        LegendRow(Color.white, "White line: where smooth turns rough (your score)");
+        LegendRow(Color.white, "White line: where smooth turns rough");
         if (State == RunState.Ready)
             GUILayout.Label("Fire the tunnel to test this design. You can go back to modeling after the run.", note);
         GUILayout.EndVertical();
@@ -417,43 +428,57 @@ public class TestBench : MonoBehaviour
         GUILayout.EndHorizontal();
     }
 
-    void DrawResults()
+    // Pops up in the middle when a run finishes. Close it (or pick an action) to continue.
+    void DrawResultsPopup(Event e)
     {
-        const float w = 460f;
         float result = Mathf.Min(resultTop, resultBottom);
 
-        GUILayout.BeginArea(new Rect(Screen.width - w - 12f, 12f, w, Screen.height * 0.6f));   // top right
-        GUILayout.BeginVertical(panel);
-        if (!UIPanels.Header("results", $"RUN COMPLETE  -  {(currentTrial != null ? currentTrial.name : "")}", head))
+        // Dim everything behind it
+        if (e.type == EventType.Repaint)
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"Smooth flow to {result:0%} at Mach {runMach:0.00}", note);
-            if (GUILayout.Button("Run again", button)) pending = Fire;
-            if (GUILayout.Button("Back to modeling", button)) pending = ExitTest;
-            GUILayout.EndHorizontal();
-            GUILayout.EndVertical();
-            GUILayout.EndArea();
-            return;
+            GUI.color = new Color(0f, 0f, 0f, 0.45f);
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), white);
+            GUI.color = Color.white;
         }
-        GUILayout.Label($"Smooth flow to {result:0%} of the model at Mach {runMach:0.00}", text);
-        GUILayout.Label(metrics.mirrored ? " " : $"Top {resultTop:0%}   ·   Bottom {resultBottom:0%}   (score uses the worse side)", note);
+
+        float w = Mathf.Min(580f, Screen.width - 48f);
+        float h = Mathf.Min(560f, Screen.height - 48f);
+        GUILayout.BeginArea(new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h));
+        GUILayout.FlexibleSpace();
+        GUILayout.BeginVertical(tablePanel);
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Label($"RUN COMPLETE  -  {(currentTrial != null ? currentTrial.name : "")}", head);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("×", button, GUILayout.Width(28f))) pending = () => resultsOpen = false;
+        GUILayout.EndHorizontal();
+        GUILayout.Space(6f);
+
+        GUILayout.Label($"{result:0%}", big);
+        GUILayout.Label($"of the model had smooth air, at Mach {runMach:0.00}", text);
+        if (!metrics.mirrored)
+            GUILayout.Label($"Top {resultTop:0%}   ·   Bottom {resultBottom:0%}   (score uses the worse side)", note);
         GUILayout.Space(4f);
-        for (int i = 0; i < 3; i++)
-            GUILayout.Label(i < recent.Count ? CompareLine(recent[i], result) : " ", note);
+        for (int i = 0; i < recent.Count; i++)
+            GUILayout.Label(CompareLine(recent[i], result), note);
 
         if (coach != null)
         {
-            GUILayout.Space(8f);
+            GUILayout.Space(10f);
             GUILayout.Label("LAB PARTNER", head);
             GUILayout.Label(TipText(), tipText);
             GUILayout.Label(coach.Waiting ? " " : coach.Source, note);
         }
-        GUILayout.Space(4f);
+
+        GUILayout.Space(10f);
         GUILayout.BeginHorizontal();
-        if (GUILayout.Button("Run again", button)) pending = Fire;
-        if (GUILayout.Button("Back to modeling", button)) pending = ExitTest;
+        if (GUILayout.Button("Run again", button, GUILayout.Height(32f))) pending = () => { resultsOpen = false; Fire(); };
+        if (GUILayout.Button("Back to modeling", button, GUILayout.Height(32f))) pending = () => { resultsOpen = false; ExitTest(); };
+        if (GUILayout.Button("Close  [Esc]", button, GUILayout.Height(32f))) pending = () => resultsOpen = false;
         GUILayout.EndHorizontal();
+
         GUILayout.EndVertical();
+        GUILayout.FlexibleSpace();
         GUILayout.EndArea();
     }
 
