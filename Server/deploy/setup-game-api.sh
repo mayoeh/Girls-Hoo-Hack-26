@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# Runs on the Vultr server (the same one as the arm relay). Called by deploy-shockwave.ps1:
-#   bash /opt/shockwave/deploy/setup-shockwave.sh yourdomain.com
-# Runs the Shockwave server (Gemini feedback + Tiger Data) as an always-on service on port 3000
-# and routes https://DOMAIN/api/shockwave/* to it. The arm relay keeps everything else.
+# Runs on the Vultr server (the same one as the arm relay). Called by deploy-game-api.ps1:
+#   bash /opt/shockwave/deploy/setup-game-api.sh yourdomain.com
+# Runs the game API (Server/game-api: Gemini feedback + Tiger Data) as an always-on service on port 3000.
+# Server-side names stay "shockwave" (/opt/shockwave, service shockwave, /etc/shockwave.env, /api/shockwave/*)
+# so existing Unity URLs keep working.
+# Routes https://DOMAIN/api/shockwave/* to it. The arm relay keeps everything else.
 set -euo pipefail
 
 DOMAIN="${1:-}"
 if [ -z "$DOMAIN" ]; then
-  echo "Usage: bash setup-shockwave.sh <domain>"
+  echo "Usage: bash setup-game-api.sh <domain>"
   exit 1
 fi
 APP_DIR=/opt/shockwave
 SERVICE=shockwave
 PORT=3000
 
-command -v node >/dev/null || { echo "Node isn't installed. Run the arm relay deploy (deploy.ps1) first."; exit 1; }
-command -v caddy >/dev/null || { echo "Caddy isn't installed. Run the arm relay deploy (deploy.ps1) first."; exit 1; }
+command -v node >/dev/null || { echo "Node isn't installed. Run the arm relay deploy (deploy-arm-relay.ps1) first."; exit 1; }
+command -v caddy >/dev/null || { echo "Caddy isn't installed. Run the arm relay deploy (deploy-arm-relay.ps1) first."; exit 1; }
 
 echo "==> Installing Shockwave dependencies"
 cd "$APP_DIR"

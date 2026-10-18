@@ -53,7 +53,7 @@ public class TrialLog : MonoBehaviour
     void Update()
     {
         var kb = Keyboard.current;
-        if (kb != null && !UIPanels.Typing && kb.sKey.wasPressedThisFrame) SaveAndTest();
+        if (kb != null && !UIPanels.Typing && !Leaderboard.Typing && kb.sKey.wasPressedThisFrame) SaveAndTest();
         UpdateGhost();
     }
 

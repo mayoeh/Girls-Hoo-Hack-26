@@ -45,6 +45,8 @@ public class BreathingUdpReceiver : MonoBehaviour
     [Tooltip("Start breathing_udp_sender.exe automatically (hidden) when the game starts, and stop it when the game ends. " +
              "Build it once with BreathingSender\\build_and_run.bat first.")]
     public bool autoStartSender = true;
+    [Tooltip("Restart the camera sender by itself if it crashes or goes silent for this many seconds (0 = never).")]
+    public float autoRestartAfterSeconds = 8f;
     [Tooltip("The BreathingSender folder, relative to the project folder (Editor) or the game's folder (a build).")]
     public string senderFolder = "BreathingSender";
 
@@ -64,6 +66,10 @@ public class BreathingUdpReceiver : MonoBehaviour
     [Tooltip("Game lengths the player can pick from (seconds).")]
     public float[] lengthChoices = { 20f, 30f, 60f };
     public float getReadySeconds = 3f;
+    [Tooltip("Unscored practice breaths before the real round (when Warm-up is on in the menu).")]
+    public int warmupBreaths = 2;
+    [Tooltip("Length of each warm-up breath in and out (seconds). Slow and steady on every difficulty.")]
+    public float warmupBreathSeconds = 4f;
     [Tooltip("Fired when a game finishes (e.g. to light this star in the constellation).")]
     public UnityEvent onStarLit;
 
@@ -89,6 +95,8 @@ public class BreathingUdpReceiver : MonoBehaviour
     public bool showDebugInfo = false;
     [Tooltip("The full camera picture (toggle with the Video button). The head-position box is always shown.")]
     public bool showVideoPreview = false;
+    [Tooltip("Also show the head-position box on the menu. It always shows once a game starts (get ready, warm-up, playing); D shows it too.")]
+    public bool showHeadGuide = false;
     public int guiFontSize = 26;
 
     // ---------- threading ----------
@@ -129,10 +137,19 @@ public class BreathingUdpReceiver : MonoBehaviour
     private int direction;              // +1 in, -1 out
 
     // ---------- game ----------
-    private enum Phase { Menu, GetReady, Playing, Results }
+    private enum Phase { Menu, GetReady, WarmUp, Playing, Results }
     private Phase phase = Phase.Menu;
     private Difficulty difficulty = Difficulty.Easy;
     private bool timerOn = true;
+    private bool warmupOn = true;
+    private bool devTools;                      // D toggles the developer buttons (Debug, Video)
+    private float menuContentH, resultsContentH; // measured last frame, so panels fit their content
+    private Vector2 menuScroll;
+    private Leaderboard boardInstance;           // Tiger Data leaderboard for this game (shared helper)
+    private Leaderboard board => boardInstance ??= new Leaderboard(this, "star", "%", 0);
+    private Vector2 resultsScroll;
+    private float warmupTime;
+    private float WarmupLength => Mathf.Max(0, warmupBreaths) * 2f * Mathf.Max(1f, warmupBreathSeconds);
     private int lengthIndex = 1;                 // 30 s by default
     private float SessionLength => lengthChoices != null && lengthChoices.Length > 0
         ? lengthChoices[Mathf.Clamp(lengthIndex, 0, lengthChoices.Length - 1)] : 30f;
@@ -177,7 +194,9 @@ public class BreathingUdpReceiver : MonoBehaviour
     {
         public string coach, source, error;
         public bool stored;
-        public int sessionId, yourBest, bestToday, bestForDifficulty;
+        public int sessionId, yourBest, bestToday, bestForDifficulty, breaths;
+        public float breathSeconds;
+        public string steadiness, starType;   // simple facts about the player's rhythm, worked out on the server
         public Bucket[] buckets;
         public HistoryItem[] history;
     }
@@ -302,6 +321,7 @@ public class BreathingUdpReceiver : MonoBehaviour
         UpdatePreviewTexture();
         UpdatePlayback();
         UpdateGame(Time.unscaledDeltaTime);
+        WatchSender();
         if (guideStar != null) guideStar.UpdateGlowFromBreathing(guideLevel);
     }
 
@@ -580,6 +600,13 @@ public class BreathingUdpReceiver : MonoBehaviour
         phaseStart = Time.unscaledTime;
     }
 
+    void BeginScoredRound()
+    {
+        phase = Phase.Playing;
+        phaseStart = Time.unscaledTime;
+        guideTime = 0f;
+    }
+
     void UpdateGame(float dt)
     {
         switch (phase)
@@ -597,11 +624,25 @@ public class BreathingUdpReceiver : MonoBehaviour
                 guideInhale = true;
                 if (Time.unscaledTime - phaseStart >= getReadySeconds)
                 {
-                    phase = Phase.Playing;
+                    if (warmupOn && WarmupLength > 0f) { phase = Phase.WarmUp; warmupTime = 0f; }
+                    else BeginScoredRound();
                     phaseStart = Time.unscaledTime;
-                    guideTime = 0f;
                 }
                 break;
+
+            case Phase.WarmUp:
+            {
+                // Slow, steady practice breaths. Nothing is recorded or scored. It ends fully dim,
+                // so the scored round carries straight on with a breath in.
+                warmupTime += dt;
+                float half = Mathf.Max(1f, warmupBreathSeconds);
+                float into = warmupTime % (2f * half);
+                guideInhale = into < half;
+                guideLevel = guideInhale ? Ease(into / half) : 1f - Ease((into - half) / half);
+                guideSecondsLeft = guideInhale ? half - into : 2f * half - into;
+                if (warmupTime >= WarmupLength) BeginScoredRound();
+                break;
+            }
 
             case Phase.Playing:
                 guideTime += dt;
@@ -616,6 +657,10 @@ public class BreathingUdpReceiver : MonoBehaviour
                 {
                     result = ComputeResult();
                     phase = Phase.Results;
+                    resultsScroll = Vector2.zero; resultsContentH = 0f;
+                    if (result.enoughData)
+                        board.NewResult(result.score, $"{{\"difficulty\":\"{difficulty}\",\"length\":{Mathf.RoundToInt(SessionLength)},\"timer\":{(timerOn ? "true" : "false")}}}");
+                    else board.Refresh();
                     reply = null;
                     serverState = ServerState.Off;
                     if (useServer && result.enoughData && !string.IsNullOrEmpty(sessionUrl)) StartCoroutine(SendSession());
@@ -895,6 +940,60 @@ public class BreathingUdpReceiver : MonoBehaviour
         }
     }
 
+    // ---------- restarting the camera ----------
+    // R (or the "Restart camera" button) restarts it by hand. It also restarts by itself if the sender
+    // crashes or stops sending, at most once every 20 s so a broken camera doesn't loop forever.
+    private bool restarting;
+    private float lastRestart = -999f;
+
+    public void RestartCamera()
+    {
+        if (!restarting) StartCoroutine(RestartRoutine());
+    }
+
+    System.Collections.IEnumerator RestartRoutine()
+    {
+        restarting = true;
+        lastRestart = Time.unscaledTime;
+        senderNote = "Restarting the camera...";
+        StopSender();
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        // Also stops a sender started by hand (build_and_run.bat), so only one has the camera.
+        try { foreach (var p in System.Diagnostics.Process.GetProcessesByName("breathing_udp_sender")) { try { p.Kill(); } catch { } } }
+        catch (Exception) { }
+#endif
+        anyPacket = false; errorText = ""; statusCode = -1;
+        // Wait (up to 5 s) for the old sender to be fully gone, then give Windows a moment to release the camera.
+        for (float waited = 0f; waited < 5f; waited += 0.25f)
+        {
+            bool gone = true;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            try { gone = System.Diagnostics.Process.GetProcessesByName("breathing_udp_sender").Length == 0; } catch (Exception) { }
+#endif
+            if (gone) break;
+            yield return new WaitForSecondsRealtime(0.25f);
+        }
+        yield return new WaitForSecondsRealtime(1f);
+        StartSender();
+        lastRestart = Time.unscaledTime;
+        restarting = false;
+    }
+
+    void WatchSender()
+    {
+        if (!autoStartSender || autoRestartAfterSeconds <= 0f || restarting) return;
+        if (Time.unscaledTime - lastRestart < 20f) return;
+        bool crashed = false;
+        try { crashed = senderProcess != null && senderProcess.HasExited; } catch (Exception) { }
+        bool silent = anyPacket && Time.unscaledTime - lastPacketTime > autoRestartAfterSeconds;
+        bool neverStarted = senderProcess != null && !anyPacket && Time.unscaledTime - lastRestart > 45f && Time.unscaledTime > 45f;
+        if (crashed || silent || neverStarted)
+        {
+            Debug.LogWarning("[Star] Camera sender " + (crashed ? "crashed" : "went silent") + ", restarting it.");
+            RestartCamera();
+        }
+    }
+
     void StopSender()
     {
         try
@@ -976,18 +1075,37 @@ public class BreathingUdpReceiver : MonoBehaviour
         {
             case Phase.Menu: DrawMenu(); break;
             case Phase.GetReady: DrawGetReady(); break;
+            case Phase.WarmUp: DrawWarmUp(); break;
             case Phase.Playing: DrawPlaying(); break;
             case Phase.Results: DrawResults(); break;
         }
 
-        // Head-position guide: top right, on every screen except the results.
-        if (phase != Phase.Results) DrawHeadGuide();
+        // Head-position guide, bottom right: shows once the player has picked their settings and pressed START
+        // (get ready, warm-up, playing). Hidden on the menu so it doesn't cover the settings, unless D or showHeadGuide.
+        bool inGame = phase == Phase.GetReady || phase == Phase.WarmUp || phase == Phase.Playing;
+        if (inGame || (phase == Phase.Menu && (showHeadGuide || devTools))) DrawHeadGuide();
 
-        // Small toggles, bottom left
-        if (GUI.Button(new Rect(10, Screen.height - 38, 90, 28), showDebugInfo ? "Debug: on" : "Debug", buttonStyle))
-            showDebugInfo = !showDebugInfo;
-        if (GUI.Button(new Rect(106, Screen.height - 38, 90, 28), showVideoPreview ? "Video: on" : "Video", buttonStyle))
-            showVideoPreview = !showVideoPreview;
+        // R: restart the camera (any screen).
+        if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.R && !Leaderboard.Typing)
+        {
+            RestartCamera();
+            Event.current.Use();
+        }
+
+        // Developer tools (press D): Debug and Video toggles, bottom left. Hidden from players.
+        if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.D && !Leaderboard.Typing)
+        {
+            devTools = !devTools;
+            if (!devTools) { showDebugInfo = false; showVideoPreview = false; }
+            Event.current.Use();
+        }
+        if (devTools)
+        {
+            if (GUI.Button(new Rect(10, Screen.height - 38, 90, 28), showDebugInfo ? "Debug: on" : "Debug", buttonStyle))
+                showDebugInfo = !showDebugInfo;
+            if (GUI.Button(new Rect(106, Screen.height - 38, 90, 28), showVideoPreview ? "Video: on" : "Video", buttonStyle))
+                showVideoPreview = !showVideoPreview;
+        }
         if (showVideoPreview) DrawPreview();
         if (showDebugInfo) DrawDebugPanel();
     }
@@ -1000,60 +1118,84 @@ public class BreathingUdpReceiver : MonoBehaviour
         int t = Mathf.Max(13, Mathf.RoundToInt(guiFontSize * 0.62f));
         float rowH = Mathf.Max(30f, t * 2.2f);
 
-        string blurb = "Henrietta Leavitt discovered that some stars brighten and dim in a steady rhythm. " +
-                       "Breathe in as the guide star (left) brightens and out as it dims. Your star (right) follows your breathing.";
+        string blurb = "Henrietta Leavitt found stars that brighten and dim in a steady rhythm. " +
+                       "Breathe in as the left star brightens, out as it dims. The right star is you.";
         string[] diffText =
         {
-            $"Easy: one steady rhythm for the whole game ({easySeconds.x}-{easySeconds.y} s per breath in or out).",
-            $"Medium: every breath has a new length, {mediumSeconds.x}-{mediumSeconds.y} s (in and out match).",
-            $"Hard: breath-in and breath-out lengths change separately, {hardSeconds.x}-{hardSeconds.y} s.",
+            $"One steady rhythm ({easySeconds.x}-{easySeconds.y} s per breath).",
+            $"Each breath a new length ({mediumSeconds.x}-{mediumSeconds.y} s).",
+            $"In and out change separately ({hardSeconds.x}-{hardSeconds.y} s).",
         };
 
-        // Measure, then draw the panel behind everything.
+        // The settings scroll if the window is short; the status line and START stay pinned at the bottom.
+        string problem = ConnectionProblem();
+        string ready = problem ?? "Camera is reading your breathing. Ready when you are!";
+        smallStyle.alignment = TextAnchor.UpperCenter;
+        float readyH = smallStyle.CalcHeight(new GUIContent(ready), iw);
+        float footer = 10 + readyH + 6 + 44;
+        float contentH = menuContentH > 0 ? menuContentH : 560f;
+        float h = Mathf.Min(H - 32f, pad + contentH + footer + pad);
+        var panel = new Rect(x, Mathf.Round(Mathf.Max(16f, (H - h) / 2f)), w, h);
+        Panel(panel);
+
+        var view = new Rect(panel.x, panel.y + pad, panel.width, panel.height - 2 * pad - footer);
+        menuScroll = GUI.BeginScrollView(view, menuScroll, new Rect(0, 0, panel.width - 18f, contentH), false, false);
+        float cx = pad, y = 0f;
+
         float titleH = style.CalcHeight(new GUIContent("BREATHE WITH THE STAR"), iw);
-        float blurbH = smallStyle.CalcHeight(new GUIContent(blurb), iw);
-        float h = pad + titleH + 8 + blurbH + 14 + (t + 8) * 3 + (rowH + 6) * 3 + smallStyle.CalcHeight(new GUIContent(diffText[0]), iw) * 2 + 20 + 44 + 30 + pad;
-        h = Mathf.Min(h, H - 32f);
-        float y0 = Mathf.Round(Mathf.Max(16f, (H - h) / 2f));
-        Panel(new Rect(x, y0, w, h));
-
-        float y = y0 + pad;
         style.alignment = TextAnchor.UpperCenter;
-        Shadowed(new Rect(x + pad, y, iw, titleH), "BREATHE WITH THE STAR", Gold, style);
-        y += titleH + 8;
+        Shadowed(new Rect(cx, y, iw, titleH), "BREATHE WITH THE STAR", Gold, style);
+        y += titleH + 6;
+        float blurbH = smallStyle.CalcHeight(new GUIContent(blurb), iw);
         smallStyle.alignment = TextAnchor.UpperLeft;
-        Shadowed(new Rect(x + pad, y, iw, blurbH), blurb, Color.white, smallStyle);
-        y += blurbH + 14;
+        Shadowed(new Rect(cx, y, iw, blurbH), blurb, Color.white, smallStyle);
+        y += blurbH + 10;
 
-        // Difficulty
-        Label(ref y, x + pad, iw, "DIFFICULTY", t);
-        int d = ChoiceRow(ref y, x + pad, iw, rowH, new[] { "Easy", "Medium", "Hard" }, (int)difficulty);
+        Label(ref y, cx, iw, "DIFFICULTY", t);
+        int d = ChoiceRow(ref y, cx, iw, rowH, new[] { "Easy", "Medium", "Hard" }, (int)difficulty);
         difficulty = (Difficulty)d;
-        Note(ref y, x + pad, iw, diffText[d]);
+        Note(ref y, cx, iw, diffText[d]);
 
-        // Timer
-        Label(ref y, x + pad, iw, "BREATHING TIMER", t);
-        timerOn = ChoiceRow(ref y, x + pad, iw, rowH, new[] { "On", "Off" }, timerOn ? 0 : 1) == 0;
-        Note(ref y, x + pad, iw, timerOn ? "Shows \"Breathe in 3, 2, 1\" counts." : "No counts: follow the star by eye (harder).");
+        Label(ref y, cx, iw, "BREATHING TIMER", t);
+        timerOn = ChoiceRow(ref y, cx, iw, rowH, new[] { "On", "Off" }, timerOn ? 0 : 1) == 0;
+        Note(ref y, cx, iw, timerOn ? "Shows in / out counts." : "No counts: follow the star by eye.");
 
-        // Length
-        Label(ref y, x + pad, iw, "LENGTH", t);
+        Label(ref y, cx, iw, "WARM-UP", t);
+        warmupOn = ChoiceRow(ref y, cx, iw, rowH, new[] { "On", "Off" }, warmupOn ? 0 : 1) == 0;
+        Note(ref y, cx, iw, warmupOn ? $"{warmupBreaths} practice breaths first, not scored." : "Straight into the scored round.");
+
+        Label(ref y, cx, iw, "LENGTH", t);
         var lengths = new string[lengthChoices.Length];
         for (int i = 0; i < lengths.Length; i++) lengths[i] = Mathf.RoundToInt(lengthChoices[i]) + " s";
-        lengthIndex = ChoiceRow(ref y, x + pad, iw, rowH, lengths, Mathf.Clamp(lengthIndex, 0, lengths.Length - 1));
-        y += 10;
+        lengthIndex = ChoiceRow(ref y, cx, iw, rowH, lengths, Mathf.Clamp(lengthIndex, 0, lengths.Length - 1));
+        GUI.EndScrollView();
+        menuContentH = y + 4;
+        // Hint only while there's still something below (hidden once scrolled to the end, or when it all fits).
+        if (menuScroll.y < menuContentH - view.height - 2f)
+        {
+            smallStyle.alignment = TextAnchor.UpperRight;
+            Shadowed(new Rect(panel.x + pad, view.yMax - 2, iw - 8, 20), "more below: scroll down", new Color(1f, 1f, 1f, 0.6f), smallStyle);
+        }
 
-        // Ready?
-        string problem = ConnectionProblem();
+        // Pinned footer
+        float fy = view.yMax + 10;
         smallStyle.alignment = TextAnchor.UpperCenter;
-        Shadowed(new Rect(x + pad, y, iw, 26), problem ?? "Camera is reading your breathing. Ready when you are!",
-                 problem == null ? Green : Orange, smallStyle);
-        y += 30;
-
-        GUI.enabled = problem == null;
-        if (GUI.Button(new Rect(x + pad, y, iw, 44), problem == null ? "START" : "Waiting for the camera...", buttonStyle))
-            StartGame();
-        GUI.enabled = true;
+        Shadowed(new Rect(panel.x + pad, fy, iw, readyH), ready, problem == null ? Green : Orange, smallStyle);
+        fy += readyH + 6;
+        if (problem == null)
+        {
+            if (GUI.Button(GameFonts.Px(new Rect(panel.x + pad, fy, iw, 44)), "START", buttonStyle)) StartGame();
+        }
+        else
+        {
+            // Camera not ready: a disabled "waiting" bar plus a way to restart it.
+            float rw = Mathf.Min(220f, iw * 0.4f);
+            GUI.enabled = false;
+            GUI.Button(GameFonts.Px(new Rect(panel.x + pad, fy, iw - rw - 10f, 44)), restarting ? "Restarting..." : "Waiting for the camera...", buttonStyle);
+            GUI.enabled = !restarting;
+            if (GUI.Button(GameFonts.Px(new Rect(panel.x + pad + iw - rw, fy, rw, 44)), "Restart camera (R)", buttonStyle)) RestartCamera();
+            GUI.enabled = true;
+        }
     }
 
     void Label(ref float y, float x, float w, string text, int size)
@@ -1099,6 +1241,51 @@ public class BreathingUdpReceiver : MonoBehaviour
         smallStyle.alignment = TextAnchor.UpperCenter;
         Shadowed(new Rect(r.x + 16, r.yMax - 64, r.width - 32, 56),
                  "Get ready: breathe in when the left star starts to brighten.", Color.white, smallStyle);
+    }
+
+    // ---------- warm-up ----------
+    void DrawWarmUp()
+    {
+        float W = Screen.width;
+        float y = 16f;
+        int half = Mathf.Max(1, Mathf.RoundToInt(warmupBreathSeconds));
+        int breath = Mathf.Min(warmupBreaths, Mathf.FloorToInt(warmupTime / (2f * half)) + 1);
+        int left = Mathf.Max(1, Mathf.CeilToInt(WarmupLength - warmupTime));
+
+        style.alignment = TextAnchor.UpperCenter;
+        Shadowed(new Rect(0, y, W, guiFontSize + 10), "WARM-UP", Gold, style);
+        y += guiFontSize + 12;
+        smallStyle.alignment = TextAnchor.UpperCenter;
+        Shadowed(new Rect(0, y, W, 26), $"Practice breath {breath} of {warmupBreaths}  ·  not scored  ·  round starts in {left} s",
+                 Color.white, smallStyle);
+        y += 30;
+
+        // Tracking check, so problems get fixed before the score counts.
+        string problem = ConnectionProblem();
+        float bw = Mathf.Min(900f, W - 40f);
+        if (problem != null)
+        {
+            Panel(new Rect(Mathf.Round((W - bw) / 2f), y - 4, bw, 34), 0.75f);
+            Shadowed(new Rect((W - bw) / 2f, y, bw, 28), problem, Orange, smallStyle);
+        }
+        else
+        {
+            Shadowed(new Rect(0, y, W, 28), Tracking
+                ? "Tracking you. Your star (right) should brighten as you breathe in."
+                : "Looking for you... keep your head in the box.", Tracking ? Green : Orange, smallStyle);
+        }
+        y += 38;
+
+        DrawCoach(y);   // counts always shown in the warm-up, even with the timer off
+
+        float sw = 220f;
+        var skip = GameFonts.Px(new Rect(Mathf.Round((W - sw) / 2f), Screen.height - 70f, sw, 40f));
+        bool space = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Space;
+        if (GUI.Button(skip, "Skip warm-up (Space)", buttonStyle) || space)
+        {
+            if (space) Event.current.Use();
+            BeginScoredRound();
+        }
     }
 
     // ---------- playing ----------
@@ -1182,7 +1369,7 @@ public class BreathingUdpReceiver : MonoBehaviour
 
         // Online part: Gemini's tip, bests/history and the timeline from Tiger Data.
         string coach = null, bests = null;
-        if (serverState == ServerState.Waiting) coach = "Your lab partner is looking at your breathing" + new string('.', 1 + (int)(Time.unscaledTime * 3f) % 3);
+        if (serverState == ServerState.Waiting) coach = "Timing your star like Henrietta Leavitt would" + new string('.', 1 + (int)(Time.unscaledTime * 3f) % 3);
         else if (serverState == ServerState.Done && reply != null)
         {
             if (!string.IsNullOrEmpty(reply.coach)) coach = reply.coach;
@@ -1205,60 +1392,67 @@ public class BreathingUdpReceiver : MonoBehaviour
         float statsH = smallStyle.CalcHeight(new GUIContent(lines.ToString()), iw);
         float notesH = smallStyle.CalcHeight(new GUIContent(notes.ToString()), iw);
         int big = Mathf.RoundToInt(guiFontSize * 2.6f);
-        float h = Mathf.Min(H - 32f, pad + guiFontSize + 10 + big + 20 + 30 + 26 + statsH + 12 + 26 + notesH + 16 + online + 44 + pad);
+        float contentH = resultsContentH > 0 ? resultsContentH
+            : guiFontSize + 10 + big + 14 + 30 + 28 + (statsH > 0 ? statsH + 12 : 0) + 26 + notesH + 12 + online;
+        float h = Mathf.Min(H - 32f, pad + contentH + 12 + 44 + pad);
         var r = new Rect(Mathf.Round((W - w) / 2f), Mathf.Round(Mathf.Max(16f, (H - h) / 2f)), w, h);
         Panel(r);
 
-        float y = r.y + pad;
+        // Everything above the buttons scrolls when it doesn't fit (mouse wheel or the bar on the right).
+        // The buttons stay pinned to the bottom of the panel.
+        var view = new Rect(r.x, r.y + pad, r.width, r.height - 2 * pad - 44 - 12);
+        resultsScroll = GUI.BeginScrollView(view, resultsScroll, new Rect(0, 0, r.width - 18f, contentH), false, false);
+        var rr = new Rect(0, 0, r.width, contentH);   // content coordinates
+        float y = 0f;
         style.alignment = TextAnchor.UpperCenter;
-        Shadowed(new Rect(r.x, y, r.width, guiFontSize + 8), "RESULTS", new Color(0.6f, 0.78f, 0.9f), style);
+        Shadowed(new Rect(rr.x, y, rr.width, guiFontSize + 8), "RESULTS", new Color(0.6f, 0.78f, 0.9f), style);
         y += guiFontSize + 10;
 
         int old = style.fontSize;
         style.fontSize = big;
         string scoreText = result.enoughData ? result.score + "%" : "--";
         Color scoreColor = result.score >= 80 ? Green : result.score >= 50 ? Gold : Orange;
-        Shadowed(new Rect(r.x, y, r.width, big + 12), scoreText, scoreColor, style);
+        Shadowed(new Rect(rr.x, y, rr.width, big + 12), scoreText, scoreColor, style);
         style.fontSize = old;
         y += big + 14;
 
         smallStyle.alignment = TextAnchor.UpperCenter;
-        Shadowed(new Rect(r.x + pad, y, iw, 26), result.enoughData ? $"in sync with the star  ·  {Rating(result.score)}" : "not enough breathing data",
+        Shadowed(new Rect(rr.x + pad, y, iw, 26), result.enoughData ? $"in sync with the star  ·  {Rating(result.score)}" : "not enough breathing data",
                  Color.white, smallStyle);
         y += 30;
-        Shadowed(new Rect(r.x + pad, y, iw, 24), settings, new Color(1f, 1f, 1f, 0.6f), smallStyle);
+        Shadowed(new Rect(rr.x + pad, y, iw, 24), settings, new Color(1f, 1f, 1f, 0.6f), smallStyle);
         y += 28;
 
         smallStyle.alignment = TextAnchor.UpperLeft;
-        if (statsH > 0) { Shadowed(new Rect(r.x + pad, y, iw, statsH), lines.ToString(), Color.white, smallStyle); y += statsH + 12; }
-        Shadowed(new Rect(r.x + pad, y, iw, 24), "NOTES", new Color(0.6f, 0.78f, 0.9f), smallStyle);
+        if (statsH > 0) { Shadowed(new Rect(rr.x + pad, y, iw, statsH), lines.ToString(), Color.white, smallStyle); y += statsH + 12; }
+        Shadowed(new Rect(rr.x + pad, y, iw, 24), "NOTES", new Color(0.6f, 0.78f, 0.9f), smallStyle);
         y += 26;
-        Shadowed(new Rect(r.x + pad, y, iw, notesH), notes.ToString(), Color.white, smallStyle);
+        Shadowed(new Rect(rr.x + pad, y, iw, notesH), notes.ToString(), Color.white, smallStyle);
         y += notesH + 12;
 
         if (coach != null)
         {
-            Shadowed(new Rect(r.x + pad, y, iw, 24), "LAB PARTNER", new Color(0.6f, 0.78f, 0.9f), smallStyle);
+            Shadowed(new Rect(rr.x + pad, y, iw, 24), "LEAVITT'S NOTEBOOK", new Color(0.6f, 0.78f, 0.9f), smallStyle);
             y += 26;
-            Shadowed(new Rect(r.x + pad, y, iw, coachH), coach, serverState == ServerState.Waiting ? new Color(1f, 1f, 1f, 0.6f) : Gold, smallStyle);
+            Shadowed(new Rect(rr.x + pad, y, iw, coachH), coach, serverState == ServerState.Waiting ? new Color(1f, 1f, 1f, 0.6f) : Gold, smallStyle);
             y += coachH + 10;
         }
         if (bests != null)
         {
-            Shadowed(new Rect(r.x + pad, y, iw, bestsH), bests, new Color(1f, 1f, 1f, 0.8f), smallStyle);
+            Shadowed(new Rect(rr.x + pad, y, iw, bestsH), bests, new Color(1f, 1f, 1f, 0.8f), smallStyle);
             y += bestsH + 8;
         }
         if (timeline)
         {
             // How closely you followed the star in each 5-second stretch (worked out by Tiger Data's time_bucket).
-            Shadowed(new Rect(r.x + pad, y, iw, 24), "YOUR GAME, 5 SECONDS AT A TIME", new Color(0.6f, 0.78f, 0.9f), smallStyle);
+            Shadowed(new Rect(rr.x + pad, y, iw, 24), "YOUR GAME, 5 SECONDS AT A TIME", new Color(0.6f, 0.78f, 0.9f), smallStyle);
             y += 26;
             int n = reply.buckets.Length;
             float gap = 4f, bw2 = (iw - gap * (n - 1)) / n, barH = 34f;
             for (int i = 0; i < n; i++)
             {
                 var bk = reply.buckets[i];
-                var cell = new Rect(r.x + pad + i * (bw2 + gap), y, bw2, barH);
+                var cell = new Rect(rr.x + pad + i * (bw2 + gap), y, bw2, barH);
                 Fill(cell, new Color(1f, 1f, 1f, 0.06f));
                 if (bk.match >= 0f)
                 {
@@ -1268,6 +1462,22 @@ public class BreathingUdpReceiver : MonoBehaviour
                 }
             }
             y += barH + 12;
+        }
+
+        // Leaderboard (all players, this game), saved in Tiger Data
+        {
+            y += 6;
+            float bh = board.Height(smallStyle, smallStyle);
+            board.Draw(new Rect(rr.x + pad, y, iw, bh), smallStyle, smallStyle, buttonStyle);
+            y += bh + 8;
+        }
+
+        GUI.EndScrollView();
+        resultsContentH = y + 4;   // exact height, used next frame (grows when the notebook note arrives)
+        if (resultsScroll.y < resultsContentH - view.height - 2f)
+        {
+            smallStyle.alignment = TextAnchor.UpperRight;
+            Shadowed(new Rect(r.x + pad, view.yMax - 2, iw - 8, 20), "more below: scroll down", new Color(1f, 1f, 1f, 0.6f), smallStyle);
         }
 
         float bw = (iw - 10f) / 2f, by = r.yMax - pad - 44f;
@@ -1284,7 +1494,7 @@ public class BreathingUdpReceiver : MonoBehaviour
     void DrawHeadGuide()
     {
         float gw = Mathf.Min(200f, Screen.width * 0.22f), gh = gw / Mathf.Clamp(frameAspect, 1f, 2.4f);
-        var r = GameFonts.Px(new Rect(Screen.width - gw - 16f, 16f, gw, gh));
+        var r = GameFonts.Px(new Rect(Screen.width - gw - 16f, Screen.height - gh - 56f, gw, gh));   // bottom right
         Fill(new Rect(r.x - 6, r.y - 6, r.width + 12, r.height + 40), new Color(0, 0, 0, 0.55f));
         Fill(r, new Color(1f, 1f, 1f, 0.05f));
         Outline(r, new Color(1f, 1f, 1f, 0.5f));
@@ -1334,7 +1544,7 @@ public class BreathingUdpReceiver : MonoBehaviour
     {
         float pw = Mathf.Min(320, Screen.width * 0.25f);
         float ph = previewTex != null ? pw * previewTex.height / previewTex.width : pw * 0.75f;
-        var r = new Rect(Screen.width - pw - 16, Screen.height - ph - 50, pw, ph);
+        var r = new Rect(16, Screen.height - ph - 50, pw, ph);   // bottom left, above the developer buttons
         Fill(new Rect(r.x - 3, r.y - 3, r.width + 6, r.height + 6), new Color(0, 0, 0, 0.6f));
         if (previewTex != null) GUI.DrawTextureWithTexCoords(r, previewTex, new Rect(1, 0, -1, 1)); // mirrored, like a selfie
         if (previewTex == null || Time.unscaledTime - lastPreviewTime > 2f)

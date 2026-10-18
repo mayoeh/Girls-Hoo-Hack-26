@@ -95,7 +95,7 @@ public class NoseEditor : MonoBehaviour
     void HandleKeys()
     {
         var kb = Keyboard.current;
-        if (kb == null || UIPanels.Typing) return;
+        if (kb == null || UIPanels.Typing || Leaderboard.Typing) return;
         if (kb[mirrorKey].wasPressedThisFrame) ToggleMirror();
         if (kb[addDotKey].wasPressedThisFrame || kb[Key.NumpadPlus].wasPressedThisFrame) ChangePointCount(+1);
         if (kb[removeDotKey].wasPressedThisFrame || kb[Key.NumpadMinus].wasPressedThisFrame) ChangePointCount(-1);

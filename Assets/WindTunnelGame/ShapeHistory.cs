@@ -32,7 +32,7 @@ public class ShapeHistory : MonoBehaviour
     void Update()
     {
         var kb = Keyboard.current;
-        if (kb == null || UIPanels.Typing || (editor != null && editor.IsDragging)) return;
+        if (kb == null || UIPanels.Typing || Leaderboard.Typing || (editor != null && editor.IsDragging)) return;
         bool shift = kb.shiftKey.isPressed;
 
         if (kb.zKey.wasPressedThisFrame) { if (shift) Redo(); else Undo(); }

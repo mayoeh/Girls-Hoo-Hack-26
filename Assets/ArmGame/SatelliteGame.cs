@@ -63,6 +63,9 @@ public class SatelliteGame : MonoBehaviour
     readonly List<float> times = new List<float>();
     readonly List<int> missedGrabs = new List<int>();
     readonly List<int> gotAway = new List<int>();
+    Leaderboard boardInstance;   // Tiger Data leaderboard: total time, fastest first
+    Leaderboard board => boardInstance ??= new Leaderboard(this, "satellite", " s", 2);
+    Vector2 resultsScroll;
 
     bool held;
     bool satVisible;
@@ -282,7 +285,17 @@ public class SatelliteGame : MonoBehaviour
     {
         round++;
         held = false;
-        if (round >= rounds) { ShowSatellite(false); SetState(State.Results); }
+        if (round >= rounds)
+        {
+            ShowSatellite(false);
+            SetState(State.Results);
+            float total = 0f; int missed = 0, away = 0;
+            for (int i = 0; i < times.Count; i++) total += times[i];
+            foreach (int m in missedGrabs) missed += m;
+            foreach (int g in gotAway) away += g;
+            resultsScroll = Vector2.zero;
+            board.NewResult(total, $"{{\"rounds\":{times.Count},\"missedGrabs\":{missed},\"gotAway\":{away}}}");
+        }
         else BeginCountdown();
     }
 
@@ -317,7 +330,7 @@ public class SatelliteGame : MonoBehaviour
                 if (stateTime >= caughtPause) NextRound();
                 break;
             case State.Results:
-                if (Pressed("space") || Pressed("r")) EnterTitle();
+                if (!Leaderboard.Typing && (Pressed("space") || Pressed("r"))) EnterTitle();
                 break;
         }
         arm.gripClosed = held;
@@ -811,12 +824,15 @@ public class SatelliteGame : MonoBehaviour
 
     void DrawResults(float s, float W, float H)
     {
-        Rect r = FitPanel(900 * s, 640 * s, W, H);
+        Rect r = FitPanel(900 * s, 1000 * s, W, H);
         Backdrop(r);
         float buttonH = Mathf.Round(Mathf.Max(40f, 60 * s)), pad = Mathf.Round(Mathf.Max(14f, 36 * s));
         Rect btn = new Rect(r.x + pad, r.yMax - pad - buttonH, r.width - 2f * pad, buttonH);
         if (GUI.Button(btn, "Play again (Space)", button)) EnterTitle();
-        GUILayout.BeginArea(new Rect(r.x + pad, r.y + pad, r.width - 2f * pad, btn.y - r.y - pad - 8f));
+        float areaW = r.width - 2f * pad;
+        GUILayout.BeginArea(new Rect(r.x + pad, r.y + pad, areaW, btn.y - r.y - pad - 8f));
+        // Scrolls (mouse wheel) if the window is too short for the times + leaderboard.
+        resultsScroll = GUILayout.BeginScrollView(resultsScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar, GUIStyle.none);
         GUILayout.Label("MISSION COMPLETE", big);
         GUILayout.Space(20 * s);
 
@@ -835,6 +851,9 @@ public class SatelliteGame : MonoBehaviour
         }
         GUILayout.Space(20 * s);
         GUILayout.Label($"<b>Total: {total:0.00} s</b>", mid);
+        GUILayout.Space(16 * s);
+        board.DrawLayout(areaW - 20f, small, small, button);
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
 }

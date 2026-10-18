@@ -133,7 +133,7 @@ public class TestBench : MonoBehaviour
     void Update()
     {
         var kb = Keyboard.current;
-        if (kb != null && CurrentMode == Mode.Test && CanFire && kb.spaceKey.wasPressedThisFrame) Fire();
+        if (kb != null && !Leaderboard.Typing && CurrentMode == Mode.Test && CanFire && kb.spaceKey.wasPressedThisFrame) Fire();
         if (CurrentMode != Mode.Test) return;
 
         Step(Time.deltaTime);
@@ -303,7 +303,16 @@ public class TestBench : MonoBehaviour
             rocket.shape = finalBest.shape.Clone();
             rocket.Rebuild();
         }
+
+        // Leaderboard (Tiger Data): the final score is the best design's smooth-flow percentage.
+        if (finalBest != null)
+            board.NewResult(Mathf.RoundToInt(finalBest.smoothFlow * 100f),
+                $"{{\"model\":{finalBest.model},\"mach\":{finalBest.mach.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)},\"models\":{finalRows.Count}}}");
+        else board.Refresh();
     }
+
+    Leaderboard boardInstance;
+    Leaderboard board => boardInstance ??= new Leaderboard(this, "windtunnel", "", 0);
 
     void PlayAgain()
     {
@@ -744,6 +753,9 @@ public class TestBench : MonoBehaviour
             FinalRow(null, -1);
             for (int i = 0; i < finalRows.Count; i++) FinalRow(finalRows[i], i);
         }
+
+        GUILayout.Space(14f);
+        board.DrawLayout(w - 60f, head, text, fireButton);
 
         GUILayout.Space(12f);
         GUILayout.BeginHorizontal();

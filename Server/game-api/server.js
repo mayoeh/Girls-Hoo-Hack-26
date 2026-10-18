@@ -6,13 +6,16 @@
 //   On Vultr it runs as the "shockwave" service behind Caddy: see deploy/README.md.
 //      node server.js --selftest   (sends one sample request to Gemini and prints the reply)
 //
-// No npm install needed: this uses only what ships with Node 18+.
+// Star game (breathing): see star.js. It stores each game in Tiger Data (needs `npm install` for the "pg" package)
+//      node server.js --star-selftest   (sends a made-up breathing game through Tiger Data + Gemini)
 
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
 loadEnv(path.join(__dirname, ".env"));
+const star = require("./star");   // after loadEnv, so it sees TIGER_DATABASE_URL
+const boards = require("./leaderboard");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || undefined;                    // Vultr sets 127.0.0.1 (only Caddy can reach it)
 const API_KEY = process.env.GEMINI_API_KEY || "";
@@ -115,13 +118,54 @@ function validRuns(payload) {
     }));
 }
 
+// Web builds of the games run on another site (itch.io, the project website, ...), so the browser needs CORS headers.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
 function send(res, status, obj) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", ...CORS });
   res.end(JSON.stringify(obj));
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === "GET" && (req.url === "/health" || req.url === "/api/shockwave/health")) return send(res, 200, { ok: true, model: MODEL, hasKey: !!API_KEY });
+  if (req.method === "OPTIONS") { res.writeHead(204, CORS); return res.end(); }   // browser preflight for POSTs
+  if (req.method === "GET" && (req.url === "/health" || req.url === "/api/shockwave/health"))
+    return send(res, 200, { ok: true, model: MODEL, hasKey: !!API_KEY, hasDb: star.hasDb(), dbError: star.dbStatus() || undefined });
+
+  // Leaderboards (all games): submit a score, or read a game's board.
+  if (req.method === "POST" && req.url === "/api/shockwave/scores") {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; if (raw.length > 20_000) req.destroy(); });
+    req.on("end", async () => {
+      let payload;
+      try { payload = JSON.parse(raw); } catch { return send(res, 400, { ok: false, error: "Body must be JSON" }); }
+      try { send(res, 200, await boards.submit(payload)); }
+      catch (err) { console.error("[board]", err.message); send(res, 200, { ok: false, error: "Leaderboard unavailable" }); }
+    });
+    return;
+  }
+  if (req.method === "GET" && req.url.startsWith("/api/shockwave/leaderboard")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    try { return send(res, 200, await boards.leaderboard(q.get("game") || "", q.get("limit"))); }
+    catch (err) { console.error("[board]", err.message); return send(res, 200, { error: "Leaderboard unavailable" }); }
+  }
+
+  // Star game: one finished game (breathing samples + score) in, coaching + timeline + history out.
+  if (req.method === "POST" && req.url === "/api/shockwave/star/session") {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; if (raw.length > 400_000) req.destroy(); });
+    req.on("end", async () => {
+      let payload;
+      try { payload = JSON.parse(raw); } catch { return send(res, 400, { coach: "", error: "Body must be JSON" }); }
+      try { send(res, 200, await star.handleSession(payload)); }
+      catch (err) { console.error("[star]", err.message); send(res, 200, { coach: "", error: err.message }); }
+    });
+    return;
+  }
 
   if (req.method === "POST" && req.url === "/api/shockwave/feedback") {
     let raw = "";
@@ -147,7 +191,20 @@ const server = http.createServer(async (req, res) => {
 
 // ---------- startup ----------
 
-if (process.argv.includes("--selftest")) {
+if (process.argv.includes("--star-selftest")) {
+  console.log(`Database: ${star.hasDb() ? "Tiger Data (TIGER_DATABASE_URL)" : "none (set TIGER_DATABASE_URL to store games)"}`);
+  console.log(`Model: ${MODEL}\nSending a made-up 30 s breathing game...`);
+  star.handleSession(star.sampleSession())
+    .then((r) => {
+      console.log(`\nStored in Tiger Data: ${r.stored}${r.sessionId ? ` (session ${r.sessionId})` : ""}`);
+      console.log("Timeline:", r.buckets.map((b) => `${b.start}s ${b.match < 0 ? "--" : Math.round(b.match * 100) + "%"}`).join("  "));
+      console.log(`Your best: ${r.yourBest}%   Best today: ${r.bestToday}%   Earlier games: ${r.history.length}`);
+      console.log(`\nCoach (${r.source || "none"}): ${r.coach || "(none)"}`);
+      if (r.error) { console.log("\nProblems: " + r.error); process.exitCode = 1; }
+      process.exit();
+    })
+    .catch((err) => { console.error("\nFailed: " + err.message); process.exit(1); });
+} else if (process.argv.includes("--selftest")) {
   const sample = [
     { name: "Trial 1", mach: 2.0, smoothFlow: 0.31, noseAngle: 63, bluntness: 1.0, length: 1.0, tipBend: 0, mirrored: true },
     { name: "Trial 2", mach: 2.0, smoothFlow: 0.58, noseAngle: 48, bluntness: 0.45, length: 1.8, tipBend: 0, mirrored: true },
@@ -159,6 +216,10 @@ if (process.argv.includes("--selftest")) {
 } else {
   server.listen(PORT, HOST, () => {
     console.log(`Shockwave feedback server on http://localhost:${PORT}  (model ${MODEL}${API_KEY ? "" : ", NO API KEY SET"})`);
+    if (star.hasDb())
+      star.initDb().then(() => boards.initBoards()).then(() => console.log("Tiger Data: connected, star game + leaderboard tables ready"))
+        .catch((err) => console.error("Tiger Data: " + err.message));
+    else console.log("Tiger Data: not configured (star games won't be saved)");
   });
 }
 

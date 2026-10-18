@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # One-time setup on a fresh Vultr Ubuntu server. Run as root:
-#   bash /opt/arm-relay/deploy/setup.sh yourdomain.com
+#   bash /opt/arm-relay/deploy/setup-arm-relay.sh yourdomain.com
 # Installs Node + Caddy, runs server.js as a service, and gets an HTTPS cert.
 set -euo pipefail
 
 DOMAIN="${1:-}"
 if [ -z "$DOMAIN" ]; then
-  echo "Usage: bash setup.sh <domain>   e.g. bash setup.sh arm.example.com"
+  echo "Usage: bash setup-arm-relay.sh <domain>   e.g. bash setup-arm-relay.sh arm.example.com"
   exit 1
 fi
 APP_DIR=/opt/arm-relay
