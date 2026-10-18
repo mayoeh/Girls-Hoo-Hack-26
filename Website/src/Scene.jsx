@@ -6,9 +6,10 @@ import { PerspectiveCamera as TheatreCamera } from '@theatre/r3f';
 import { val } from '@theatre/core';
 import { sheet, flight, look } from './theatre';
 import { flightState } from './flightState';
-import { MODEL_URL, GUIDES, FOV, LINKS, LINK_SCALE, STARS, FRAME_LINE_MATERIAL, FRAME_STAR_MATERIAL, SKY_ZONES } from './config';
+import { MODEL_URL, GUIDES, FOV, LINKS, LINK_SCALE, STARS, FRAME_LINE_MATERIAL, FRAME_STAR_MATERIAL, SKY_ZONES, POPUPS, LAUNCH, EARTH } from './config';
 import Sky from './Sky';
 import Launch from './Launch';
+import Ground from './Ground';
 
 const FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 const smooth = (x) => x * x * (3 - 2 * x);
@@ -20,7 +21,23 @@ function useTheatreValues(obj) {
   return v;
 }
 
-export default function Scene({ done }) {
+// All CamGuide_* objects in flight order: by number, CamGuide_End last.
+function findGuides(model) {
+  const found = [];
+  model.traverse((o) => { if (/^CamGuide_/.test(o.name)) found.push(o.name); });
+  const key = (n) => (/_End$/i.test(n) ? Infinity : parseFloat(n.replace(/^CamGuide_/, '')) || 0);
+  return [...new Set(found)].sort((a, b) => key(a) - key(b));
+}
+
+// "Popup_Ride", "Popup_Ride+0.3" or a plain number -> guide number (1-based), using marker positions.
+function resolveAt(value, markerAt, fallback) {
+  if (typeof value === 'number') return value;
+  const m = /^(.+?)\s*([+-]\s*[\d.]+)?$/.exec(String(value || ''));
+  if (m && markerAt[m[1]] !== undefined) return markerAt[m[1]] + 1 + (m[2] ? parseFloat(m[2].replace(/\s/g, '')) : 0);
+  return fallback;
+}
+
+export default function Scene({ done, onGuideCount }) {
   const { scene: model } = useGLTF(MODEL_URL, false, true);
   const scroll = useScroll();
   const { camera, gl } = useThree();
@@ -34,8 +51,9 @@ export default function Scene({ done }) {
     const missing = [];
 
     // Camera guides -> a smooth path through their positions, plus their rotations.
+    const guideNames = GUIDES === 'auto' ? findGuides(model) : GUIDES;
     const pts = [], quats = [];
-    for (const n of GUIDES) {
+    for (const n of guideNames) {
       const o = get(n);
       if (!o) { missing.push(n); continue; }
       pts.push(o.getWorldPosition(new THREE.Vector3()));
@@ -45,15 +63,40 @@ export default function Scene({ done }) {
     }
     const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
 
-    // Sky zone markers -> the guide index they sit closest to.
-    const zoneAt = SKY_ZONES.map((n) => {
-      const o = get(n);
-      if (!o) { missing.push(n); return Infinity; }
-      const p = o.getWorldPosition(new THREE.Vector3());
+    // Where along the flight (0-based guide position, decimals allowed) the camera passes closest to a point.
+    const last = Math.max(1, pts.length - 1), ease = flight.value.easeAtGuides ?? 0.65;
+    const tmpP = new THREE.Vector3();
+    const pathU = (p) => {
       let best = 0, bd = Infinity;
-      pts.forEach((q, i) => { const d = q.distanceTo(p); if (d < bd) { bd = d; best = i; } });
+      for (let u = 0; u <= last + 1e-6; u += 0.01) {
+        const i = Math.min(Math.floor(u), last - 1), f = u - i;
+        curve.getPoint((i + THREE.MathUtils.lerp(f, smooth(f), ease)) / last, tmpP);
+        const d = tmpP.distanceToSquared(p); if (d < bd) { bd = d; best = u; }
+      }
       return best;
+    };
+    // Every Popup_* and SkyZone_* marker -> its spot on the flight.
+    const markerAt = {};
+    model.traverse((o) => { if (/^(Popup_|SkyZone_)/.test(o.name)) markerAt[o.name] = pathU(o.getWorldPosition(new THREE.Vector3())); });
+
+    const zoneAt = SKY_ZONES.map((n) => {
+      if (markerAt[n] === undefined) { missing.push(n); return Infinity; }
+      return markerAt[n];
     });
+
+    // Popups placed with a Unity marker (`marker: 'Popup_Ride'`) take their position from it.
+    for (const p of POPUPS) {
+      if (p._at === undefined) p._at = p.at;
+      p.at = p.marker && markerAt[p.marker] !== undefined ? markerAt[p.marker] + 1 + (p.offset || 0) : p._at;
+      if (p.marker && markerAt[p.marker] === undefined) missing.push(p.marker);
+    }
+    // Launch timings can be markers too ('SkyZone_1', 'Popup_Ride-0.6').
+    if (typeof window !== 'undefined') window.__markers = { markerAt, popups: POPUPS.map((p) => [p.marker, +p.at.toFixed(2)]) };
+    if (LAUNCH) {
+      LAUNCH._src ||= { startAt: LAUNCH.startAt, passAt: LAUNCH.passAt, endAt: LAUNCH.endAt };
+      const fb = LAUNCH.fallback || {};
+      for (const k of ['startAt', 'passAt', 'endAt']) LAUNCH[k] = resolveAt(LAUNCH._src[k], markerAt, fb[k]);
+    }
 
     // Materials we animate.
     const frameMats = new Set(), starMats = {};
@@ -90,6 +133,19 @@ export default function Scene({ done }) {
       o.traverse((c) => { if (c.isMesh) starMats[game] = c.material; });
     }
     for (const n of Object.keys(LINKS)) if (!get(n)) missing.push(n);
+    if (EARTH) {   // bigger Earth patch (scaled around its top point, which is the object's origin)
+      const e = get(EARTH.name);
+      if (e) {
+        if (!e.userData.base) e.userData.base = { scale: e.scale.clone(), pos: e.position.clone() };
+        e.scale.copy(e.userData.base.scale); e.position.copy(e.userData.base.pos); e.updateMatrixWorld(true);
+        // Grow it around the middle of its top surface, so the part under the camera stays put.
+        const box = new THREE.Box3().setFromObject(e);
+        const top = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+        const pivot = e.parent ? e.parent.worldToLocal(top.clone()) : top;
+        e.position.sub(pivot).multiplyScalar(EARTH.scale).add(pivot);
+        e.scale.multiplyScalar(EARTH.scale);
+      }
+    }
     for (const [n, k] of Object.entries(LINK_SCALE || {})) {   // relative to the exported size, so it's safe if this runs twice
       const o = get(n); if (!o) continue;
       if (!o.userData.baseScale) o.userData.baseScale = o.scale.clone();
@@ -102,10 +158,11 @@ export default function Scene({ done }) {
     const sunPos = sun ? sun.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(-1, 0.3, 0.4).multiplyScalar(10000);
     const linkMeshes = {};
     for (const [mesh, name] of linkOf) (linkMeshes[name] ||= []).push(mesh);
-    return { pts, curve, quats, count: pts.length, zoneAt, frameMats: [...frameMats], starMats, linkOf, linkMeshes, sunPos, missing };
+    return { guideNames, pts, curve, quats, count: pts.length, markerAt, zoneAt, frameMats: [...frameMats], starMats, linkOf, linkMeshes, sunPos, missing };
   }, [model]);
 
   flightState.count = rig.count;
+  useEffect(() => { onGuideCount?.(rig.count); }, [rig.count]);
   if (typeof window !== 'undefined') { window.__three = { camera, model, gl }; }
   useEffect(() => { flightState.scrollEl = scroll.el; }, [scroll.el]);
   useEffect(() => { gl.toneMappingExposure = lookVals.exposure; }, [gl, lookVals.exposure]);
@@ -223,7 +280,7 @@ export default function Scene({ done }) {
     },
   };
 
-  const g0 = rig.quats.length ? model.getObjectByName(GUIDES[0]) : null;
+  const g0 = rig.quats.length ? model.getObjectByName(rig.guideNames[0]) : null;
   const startPos = g0 ? g0.getWorldPosition(new THREE.Vector3()).toArray() : [0, 0, 0];
   const startRot = g0 ? new THREE.Euler().setFromQuaternion(g0.getWorldQuaternion(new THREE.Quaternion()).multiply(FLIP)).toArray().slice(0, 3) : [0, 0, 0];
 
@@ -235,6 +292,7 @@ export default function Scene({ done }) {
       <directionalLight position={rig.sunPos.toArray()} intensity={lookVals.sun} color="#fff6e8" />
       <primitive object={model} {...handlers} />
       <Launch model={model} guidePos={rig.pts} guideQuats={rig.quats} />
+      <Ground model={model} />
       {/* Free camera you can keyframe in the Theatre editor (choose "Free camera" in Camera Flight). */}
       <TheatreCamera
         theatreKey="Camera"

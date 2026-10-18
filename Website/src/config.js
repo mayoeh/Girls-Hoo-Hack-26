@@ -33,10 +33,17 @@ export const SKY_ZONES = ['SkyZone_1', 'SkyZone_2'];
 
 // Clickable 3D objects -> pages. `game` is the key that game saves when it's completed.
 export const LINKS = {
-  Link_Leavitt: { label: 'Breathe with the Star', who: 'Henrietta Leavitt', href: 'games/star/', game: 'star' },
-  Link_Ride:    { label: 'Satellite Catch',       who: 'Sally Ride',        href: 'games/satellite/', game: 'satellite' },
-  Link_Jackson: { label: 'Shockwave',             who: 'Mary Jackson',      href: 'games/shockwave/', game: 'shockwave' },
+  Link_Leavitt: { label: 'Pulse', who: 'Henrietta Leavitt', href: 'games/star/', game: 'star' },
+  Link_Ride:    { label: 'Orbital Catch',         who: 'Sally Ride',        href: 'games/satellite/', game: 'satellite' },
+  Link_Jackson: { label: 'Turbulent Trial',       who: 'Mary Jackson',      href: 'games/shockwave/', game: 'shockwave' },
 };
+
+// Ground under the launch pad (a big soft-edged disk). Set GROUND = null to remove it.
+export const GROUND = { under: 'Container Bases', radius: 6000, color: '#d6dbc4', sink: 1, until: 5.5 };   // until = hidden after this guide
+
+// Earth: scale the curved Earth patch up so its edges stay out of view (1 = as exported).
+// It grows around its top point, so it stays the same height under the camera.
+export const EARTH = { name: 'Earth', scale: 3 };
 
 // Make clickable objects bigger than in Unity so they read from far away (1 = as exported).
 // The Leavitt "Pulsing Star" is only 2.5 units across and the camera never gets closer than ~4000.
@@ -57,7 +64,7 @@ export const FRAME_STAR_MATERIAL = 'Mat_Star_Constellation';
 //   veilStrength: how much the exhaust covers the screen at passAt (0 = not at all, 1 = fully)
 // Set LAUNCH = null to turn the launch off.
 export const LAUNCH = {
-  object: 'Link_Jackson', startAt: 'Popup_Jackson_3+0.2', passAt: 'SkyZone_1', endAt: 'Popup_Ride_1-0.6',
+  object: 'Link_Jackson', startAt: 'Popup_Jackson_4+0.2', passAt: 'SkyZone_1', endAt: 'Popup_Ride_1-0.6',
   fallback: { startAt: 3.2, passAt: 5, endAt: 7.4 },   // used when those markers aren't in the model
   passDistance: 0.9, veilWidth: 0.55, veilStrength: 0.92,
   // Where it ends up: the stack lines up with the Satellite Catch shuttle and swaps with it.
@@ -76,6 +83,9 @@ export const END_HINT = 'Hover a star to see its mission';
 //   marker: name of a Popup_ empty in Unity. The card shows when the camera passes closest to it.
 //   at:     guide number (1 = CamGuide_01) - used when there's no marker, or the marker isn't in the model.
 //   offset: optional nudge in guides (e.g. 0.3 = a bit later than the marker).
+//   image:  local picture (public/images/...). imageUrl: online copy used if the local file is missing.
+//   meta:   small line under the name.   cite: { label, href } small source link at the bottom.
+//   game:   which game this card belongs to (clicking that belt star at the end flies back to the first one).
 // Decimals are fine (5.5 = halfway between guide 5 and 6). `side`: 'left' | 'right' | 'center'.
 // PLACEHOLDER TEXT: replace with your own.
 export const POPUPS = [
@@ -83,32 +93,112 @@ export const POPUPS = [
     body: "Three missions. Three women who shaped how we explore space. Complete each one to light a star in Orion's belt.",
     hint: 'Scroll to launch' },
 
-  // ---- Mary Jackson (3) ----
-  { marker: 'Popup_Jackson_1', at: 1.8, side: 'left', kicker: 'Mission 3 - Engineer', title: 'Mary Jackson',
-    body: "In 1958 Mary Jackson became NASA's first Black female engineer, working at Langley Research Center in Virginia." },
-  { marker: 'Popup_Jackson_2', at: 2.4, side: 'right', kicker: 'Mary Jackson - The research', title: 'Smooth or turbulent?',
-    body: "She studied how air flows over cone-shaped models in a supersonic wind tunnel, and how the nose angle changes where smooth flow turns turbulent." },
-  { marker: 'Popup_Jackson_3', at: 3, side: 'left', kicker: 'Mary Jackson - Your mission', title: 'Shockwave',
-    body: "Shape the nose, fire the tunnel, and keep the airflow smooth as far back along the model as you can.",
-    link: 'Link_Jackson' },
+  // ---- Mission 1: Mary Jackson - Turbulent Trial ----
+  { marker: 'Popup_Jackson_1',
+    at: 1.6,
+    side: 'left',
+    game: 'shockwave',
+    kicker: 'Mission 1 - Turbulent Trial',
+    title: 'Mary Jackson',
+    meta: 'Engineer  \u2219  1921 - 2005',
+    image: 'images/jackson.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Mary_Jackson_1979_Portrait_%28LRC-1979-B701_P_F002-07086%29.jpg/480px-Mary_Jackson_1979_Portrait_%28LRC-1979-B701_P_F002-07086%29.jpg',
+    cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
+  { marker: 'Popup_Jackson_2',
+    at: 2.05,
+    side: 'right',
+    game: 'shockwave',
+    kicker: 'Mary Jackson',
+    body: "Mary Jackson was a groundbreaking aerospace engineer and mathematician that broke both gender and racial barriers during her academic and engineering career.",
+    cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
+  { marker: 'Popup_Jackson_3',
+    at: 2.5,
+    side: 'left',
+    game: 'shockwave',
+    kicker: 'Mary Jackson',
+    body: "She took graduate level classes managed by the University of Virginia, using special permission to join the then-segregated courses. She went on to work as an engineer at NACA (now NASA) and wrote several research papers on turbulence with differing aircraft nose angles.",
+    cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
+  { marker: 'Popup_Jackson_4',
+    at: 2.95,
+    side: 'right',
+    game: 'shockwave',
+    kicker: 'Mary Jackson',
+    body: "She was passionate about promoting women joining the STEM workforce and inspired many through her work, with her story also being told in the award-winning movie \"Hidden Figures.\"",
+    link: 'Link_Jackson',
+    cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
 
-  // ---- Sally Ride (3) ----
-  { marker: 'Popup_Ride_1', at: 8, side: 'right', kicker: 'Mission 2 - Astronaut', title: 'Sally Ride',
-    body: "On June 18, 1983, aboard Space Shuttle Challenger (STS-7), Sally Ride became the first American woman in space." },
-  { marker: 'Popup_Ride_2', at: 8.6, side: 'left', kicker: 'Sally Ride - The arm', title: 'Release and catch',
-    body: "She operated the shuttle's robotic arm, the Canadarm, to release the SPAS-01 satellite into space and catch it again." },
-  { marker: 'Popup_Ride_3', at: 9.2, side: 'right', kicker: 'Sally Ride - Your mission', title: 'Satellite Catch',
-    body: "Your phone becomes the robotic arm. Tilt it to release the satellite, then bring it home.",
-    link: 'Link_Ride' },
+  // ---- Mission 2: Sally Ride - Orbital Catch ----
+  { marker: 'Popup_Ride_1',
+    at: 7.8,
+    side: 'right',
+    game: 'satellite',
+    kicker: 'Mission 2 - Orbital Catch',
+    title: 'Sally Ride',
+    meta: 'Astronaut and Physicist  \u2219  1951 - 2012',
+    image: 'images/ride.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Sally_Ride_%281984%29.jpg/480px-Sally_Ride_%281984%29.jpg',
+    cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
+  { marker: 'Popup_Ride_2',
+    at: 8.25,
+    side: 'left',
+    game: 'satellite',
+    kicker: 'Sally Ride',
+    body: "Sally Ride was the first American woman in space and a pioneer in space research and discovery.",
+    cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
+  { marker: 'Popup_Ride_3',
+    at: 8.7,
+    side: 'right',
+    game: 'satellite',
+    kicker: 'Sally Ride',
+    body: "After her education at Stanford, she joined NASA's first co-ed astronaut class in 1978. She completed two missions in space and had a successful career as both an astronaut and as a professor and institute director after she left NASA.",
+    cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
+  { marker: 'Popup_Ride_4',
+    at: 9.15,
+    side: 'left',
+    game: 'satellite',
+    kicker: 'Sally Ride',
+    body: "Throughout her life, she was passionate about encouraging girls and young women to get involved in STEM, and she has served as an inspiration for thousands.",
+    link: 'Link_Ride',
+    cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
 
-  // ---- Henrietta Leavitt (4) ----
-  { marker: 'Popup_Leavitt_1', at: 10.8, side: 'left', kicker: 'Mission 1 - Astronomer', title: 'Henrietta Leavitt',
-    body: "At the Harvard College Observatory, Henrietta Leavitt measured stars on thousands of glass photographic plates." },
-  { marker: 'Popup_Leavitt_2', at: 11.4, side: 'right', kicker: 'Henrietta Leavitt - The discovery', title: 'Stars that pulse',
-    body: "She studied Cepheid stars, which brighten and dim in a steady rhythm. In 1912 she showed that the slower a Cepheid pulses, the brighter it truly is." },
-  { marker: 'Popup_Leavitt_3', at: 12, side: 'left', kicker: 'Henrietta Leavitt - Why it matters', title: 'Measuring the universe',
-    body: "Her rule made Cepheids into cosmic measuring sticks. Edwin Hubble later used it to show that other galaxies lie far beyond our own." },
-  { marker: 'Popup_Leavitt_4', at: 12.5, side: 'right', kicker: 'Henrietta Leavitt - Your mission', title: 'Breathe with the Star',
-    body: "Follow a pulsing star with your breathing, read live from your webcam.",
-    link: 'Link_Leavitt' },
+  // ---- Mission 3: Henrietta Leavitt - Pulse ----
+  { marker: 'Popup_Leavitt_1',
+    at: 10.6,
+    side: 'left',
+    game: 'star',
+    kicker: 'Mission 3 - Pulse',
+    title: 'Henrietta Leavitt',
+    meta: 'Astronomer  \u2219  1868 - 1921',
+    image: 'images/leavitt.jpg',
+    imageUrl: 'https://cdn.britannica.com/66/158566-004-EBCD4212/Henrietta-Swan-Leavitt.jpg',
+    cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
+  { marker: 'Popup_Leavitt_2',
+    at: 11.05,
+    side: 'right',
+    game: 'star',
+    kicker: 'Henrietta Leavitt',
+    body: "Henrietta Leavitt was a pioneer in astronomy research and is the reason why we can measure incredible astronomical distances in space.",
+    cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
+  { marker: 'Popup_Leavitt_3',
+    at: 11.5,
+    side: 'left',
+    game: 'star',
+    kicker: 'Henrietta Leavitt',
+    body: "Despite the restrictions placed on women, such as bans from using the research telescopes at her Harvard College Observatory, she made several groundbreaking findings on variable stars.",
+    cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
+  { marker: 'Popup_Leavitt_4',
+    at: 11.95,
+    side: 'right',
+    game: 'star',
+    kicker: 'Henrietta Leavitt',
+    body: "She discovered that stars have periods of brightness and dimness, which could be used to calculate how bright stars are. Her discovery allowed for breakthroughs on how to measure distances between objects in space.",
+    cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
+  { marker: 'Popup_Leavitt_5',
+    at: 12.4,
+    side: 'left',
+    game: 'star',
+    kicker: 'Henrietta Leavitt',
+    body: "Despite her limited recognition during her lifetime, she serves as an inspiration for breaking through gender-based barriers and making an impact on the world of astronomical research.",
+    link: 'Link_Leavitt',
+    cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
 ];

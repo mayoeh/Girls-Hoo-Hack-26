@@ -18,12 +18,21 @@ export default function Overlay({ done }) {
     const loop = () => {
       const u = flightState.u;
       const last = Math.max(1, flightState.count - 1);
+      // Only the card nearest to the camera shows; it hands off to the next one halfway between them.
+      let near = -1, nd = Infinity;
+      POPUPS.forEach((p, i) => { const d = Math.abs(u - (p.at - 1)); if (d < nd) { nd = d; near = i; } });
       POPUPS.forEach((p, i) => {
         const el = cards.current[i];
         if (!el) return;
-        const d = Math.abs(u - (p.at - 1));
-        const x = Math.min(Math.max((d - 0.22) / 0.28, 0), 1);
-        const o = 1 - x * x * (3 - 2 * x);
+        let o = 0;
+        if (i === near) {
+          const at = p.at - 1, side = Math.sign(u - at) || 1;
+          let gap = 0.35;                                   // longest a card stays up on each side
+          for (const q of POPUPS) { const d = (q.at - 1 - at) * side; if (q !== p && d > 0.001) gap = Math.min(gap, d / 2); }
+          const d = Math.abs(u - at);
+          const x = Math.min(Math.max((d - gap * 0.6) / (gap * 0.4), 0), 1);
+          o = 1 - x * x * (3 - 2 * x);
+        }
         el.style.opacity = o.toFixed(3);
         el.style.transform = `translateY(${((u - (p.at - 1)) * -40).toFixed(1)}px)`;
         el.style.pointerEvents = o > 0.5 ? 'auto' : 'none';
@@ -66,8 +75,9 @@ export default function Overlay({ done }) {
   // ---------- snap scrolling toward the game points ----------
   useEffect(() => {
     if (!SNAP_RANGE || new URLSearchParams(location.search).has('studio')) return;
-    let el = null, timer = 0, raf;
+    let el = null, timer = 0, raf, lastTop = 0, dir = 0;
     const onScroll = () => {
+      if (el.scrollTop !== lastTop) { dir = Math.sign(el.scrollTop - lastTop); lastTop = el.scrollTop; }
       clearTimeout(timer);
       timer = setTimeout(() => {
         const last = Math.max(1, flightState.count - 1);
@@ -76,7 +86,8 @@ export default function Overlay({ done }) {
         const u = (el.scrollTop / max) * last;
         const points = [0, last, ...POPUPS.map((p) => p.at - 1)];
         let best = null, bd = Infinity;
-        for (const s of points) { const d = Math.abs(s - u); if (d < bd) { bd = d; best = s; } }
+        // Only glide forward (the way you were scrolling) - never pull you back to where you came from.
+        for (const s of points) { const d = Math.abs(s - u); if ((s - u) * dir >= -0.02 && d < bd) { bd = d; best = s; } }
         if (best !== null && bd < SNAP_RANGE && bd > 0.01) flightState.flyTo(best);
       }, SNAP_DELAY);
     };
@@ -98,16 +109,26 @@ export default function Overlay({ done }) {
       {POPUPS.map((p, i) => {
         const link = p.link && LINKS[p.link];
         return (
-          <section key={i} ref={(el) => (cards.current[i] = el)} className={`card card-${p.side || 'left'}`}>
-            {p.kicker && <div className="kicker">{p.kicker}</div>}
-            <h2>{p.title}</h2>
-            {p.body && <p>{p.body}</p>}
-            {link && (
-              <a className="btn" href={link.href}>
-                {done[link.game] ? 'Play again' : `Play ${link.label}`}
-              </a>
+          <section key={i} ref={(el) => (cards.current[i] = el)} className={`card card-${p.side || 'left'}${p.image ? ' card-portrait' : ''}`}>
+            {p.image && (
+              <div className="photo">
+                <img src={p.image} alt={p.title || ''} loading="eager"
+                  onError={(e) => { if (p.imageUrl && e.currentTarget.dataset.fallback !== '1') { e.currentTarget.dataset.fallback = '1'; e.currentTarget.src = p.imageUrl; } }} />
+              </div>
             )}
-            {p.hint && <div className="hint">{p.hint}<span className="chev" /></div>}
+            <div className="card-text">
+              {p.kicker && <div className="kicker">{p.kicker}</div>}
+              {p.title && <h2>{p.title}</h2>}
+              {p.meta && <div className="meta">{p.meta}</div>}
+              {p.body && <p>{p.body}</p>}
+              {link && (
+                <a className="btn" href={link.href}>
+                  {done[link.game] ? `Play ${link.label} again` : `Play ${link.label}`}
+                </a>
+              )}
+              {p.hint && <div className="hint">{p.hint}<span className="chev" /></div>}
+              {p.cite && <a className="cite" href={p.cite.href} target="_blank" rel="noreferrer">Source: {p.cite.label}</a>}
+            </div>
           </section>
         );
       })}

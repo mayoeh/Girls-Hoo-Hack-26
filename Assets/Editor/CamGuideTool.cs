@@ -123,4 +123,70 @@ public static class CamGuideTool
         if (mat != null) r.sharedMaterial = mat;
         Selection.activeGameObject = go;
     }
+    // ---------- Popup markers for the website cards ----------
+    // Order matters: Ctrl+Alt+P creates the first one in this list that doesn't exist yet.
+    static readonly string[] PopupNames = {
+        "Popup_Intro",
+        "Popup_Jackson_1", "Popup_Jackson_2", "Popup_Jackson_3", "Popup_Jackson_4",
+        "Popup_Ride_1", "Popup_Ride_2", "Popup_Ride_3", "Popup_Ride_4",
+        "Popup_Leavitt_1", "Popup_Leavitt_2", "Popup_Leavitt_3", "Popup_Leavitt_4", "Popup_Leavitt_5",
+    };
+    const string PopupGroup = "Popups";
+
+    static GameObject FindAny(string n)
+    {
+        foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            if (t.name == n && t.gameObject.scene.IsValid()) return t.gameObject;
+        return null;
+    }
+
+    static void PlacePopup(string n)
+    {
+        var view = SceneView.lastActiveSceneView;
+        if (view == null) { Debug.LogWarning("Click into the Scene view first."); return; }
+        var go = FindAny(n);
+        if (go == null)
+        {
+            var group = FindAny(PopupGroup);
+            if (group == null)
+            {
+                group = new GameObject(PopupGroup);
+                var root = FindAny("SiteMap_Root");
+                if (root != null) group.transform.SetParent(root.transform, false);
+                Undo.RegisterCreatedObjectUndo(group, "Create Popups");
+            }
+            go = new GameObject(n);
+            Undo.RegisterCreatedObjectUndo(go, "Add Popup");
+            go.transform.SetParent(group.transform, false);
+            go.AddComponent<PopupMarker>();
+        }
+        else Undo.RecordObject(go.transform, "Move Popup");
+        // Put it a little in front of where you're looking, on your current line of flight.
+        var cam = view.camera.transform;
+        go.transform.position = cam.position + cam.forward * 2f;
+        Debug.Log($"Placed {n}");
+    }
+
+    [MenuItem("Tools/Cam Guides/Popups/Add Next Popup Here %&p")]
+    static void AddNextPopup()
+    {
+        foreach (var n in PopupNames)
+            if (FindAny(n) == null) { PlacePopup(n); return; }
+        Debug.Log("All popup markers exist. Select one and use 'Move Selected Popup Here' (Ctrl+Alt+O) to move it.");
+    }
+
+    [MenuItem("Tools/Cam Guides/Popups/Move Selected Popup Here %&o")]
+    static void MoveSelectedPopup()
+    {
+        var t = Selection.activeTransform;
+        if (t == null || !t.name.StartsWith("Popup_")) { Debug.LogWarning("Select a Popup_ marker first."); return; }
+        PlacePopup(t.name);
+    }
+
+    [MenuItem("Tools/Cam Guides/Popups/Which Popup Is Next?")]
+    static void WhichNext()
+    {
+        foreach (var n in PopupNames) if (FindAny(n) == null) { Debug.Log("Next popup: " + n); return; }
+        Debug.Log("All popup markers exist.");
+    }
 }
