@@ -155,7 +155,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9d9a5969691dba845877d0a52b6d9397, type: 3}
   m_Name: UnityGLTFSettings
   m_EditorClassIdentifier: UnityGLTFScripts::UnityGLTF.GLTFSettings
-  packageVersion: 
+  packageVersion: 2.23.0
   shaderStrippingSettings:
     stripPassesFromAllShaders: 0
     stripPasses: 0
@@ -193,9 +193,9 @@ MonoBehaviour:
   exportFullPath: 0
   EditorExportTransformMode: 0
   EditorExportFileFormat: 0
-  useMainCameraVisibility: 1
+  useMainCameraVisibility: 0
   exportDisabledGameObjects: 0
-  tryExportTexturesFromDisk: 0
+  tryExportTexturesFromDisk: 1
   useTextureFileTypeHeuristic: 1
   defaultJpegQuality: 90
   exportAnimations: 1

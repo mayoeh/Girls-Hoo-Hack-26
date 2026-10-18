@@ -1,0 +1,27 @@
+{
+  "name": "stellar-site",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "9.114.0",
+    "@react-three/fiber": "8.17.10",
+    "@react-three/postprocessing": "2.16.3",
+    "@theatre/core": "0.7.2",
+    "@theatre/r3f": "0.7.2",
+    "postprocessing": "6.36.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "@theatre/studio": "0.7.2",
+    "@vitejs/plugin-react": "4.3.3",
+    "vite": "5.4.10"
+  }
+}

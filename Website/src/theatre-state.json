@@ -1,0 +1,204 @@
+{
+ "sheetsById": {
+  "Flythrough": {
+   "staticOverrides": {
+    "byObject": {
+     "Camera Flight": {
+      "useProgressKeyframes": true
+     }
+    }
+   },
+   "sequence": {
+    "subUnitsPerUnit": 30,
+    "length": 10,
+    "type": "PositionalSequence",
+    "tracksByObject": {
+     "Camera Flight": {
+      "trackData": {
+       "progressTrack": {
+        "type": "BasicKeyframedTrack",
+        "__debugName": "Camera Flight:[\"progress\"]",
+        "keyframes": [
+         {
+          "id": "g01",
+          "position": 0.0,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.0
+         },
+         {
+          "id": "g02",
+          "position": 0.8333,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.083333
+         },
+         {
+          "id": "g03",
+          "position": 1.6667,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.166667
+         },
+         {
+          "id": "g04",
+          "position": 2.5,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.25
+         },
+         {
+          "id": "g05",
+          "position": 3.3333,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.333333
+         },
+         {
+          "id": "g06",
+          "position": 4.1667,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.416667
+         },
+         {
+          "id": "g07",
+          "position": 5.0,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.5
+         },
+         {
+          "id": "g08",
+          "position": 5.8333,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.583333
+         },
+         {
+          "id": "g09",
+          "position": 6.6667,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.666667
+         },
+         {
+          "id": "g10",
+          "position": 7.5,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.75
+         },
+         {
+          "id": "g11",
+          "position": 8.3333,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.833333
+         },
+         {
+          "id": "g12",
+          "position": 9.1667,
+          "connectedRight": true,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 0.916667
+         },
+         {
+          "id": "g13",
+          "position": 10.0,
+          "connectedRight": false,
+          "handles": [
+           0.5,
+           0.5,
+           0.5,
+           0.5
+          ],
+          "type": "bezier",
+          "value": 1.0
+         }
+        ]
+       }
+      },
+      "trackIdByPropPath": {
+       "[\"progress\"]": "progressTrack"
+      }
+     }
+    }
+   }
+  }
+ },
+ "definitionVersion": "0.4.0",
+ "revisionHistory": []
+}
