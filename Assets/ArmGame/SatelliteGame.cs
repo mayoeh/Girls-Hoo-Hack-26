@@ -548,8 +548,8 @@ public class SatelliteGame : MonoBehaviour
 #if UNITY_EDITOR
     void OnValidate()
     {
-        if (!titleFont) titleFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/AstroSpace.ttf");
-        if (!bodyFont) bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/ELEGANT TYPEWRITER Regular.ttf");
+        if (!titleFont) titleFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(GameFonts.TitlePath);
+        if (!bodyFont || GameFonts.IsOldFont(bodyFont)) bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(GameFonts.BodyPath);
         big = null;   // rebuild styles if fonts change in Play mode
     }
 #endif
@@ -558,6 +558,11 @@ public class SatelliteGame : MonoBehaviour
     {
         styleHeight = Screen.height;
         float s = Screen.height / 1080f;
+        // Shared fonts: Astro Space for titles, Clean Typewriter for the rest, kept sharp (see GameFonts).
+        GameFonts.Title = titleFont;
+        GameFonts.Body = bodyFont;
+        titleFont = GameFonts.Title;
+        bodyFont = GameFonts.Body;
         big = new GUIStyle(GUI.skin.label) { font = titleFont, fontSize = Mathf.RoundToInt(64 * s), alignment = TextAnchor.MiddleCenter, fontStyle = titleFont ? FontStyle.Normal : FontStyle.Bold, richText = true };
         mid = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(30 * s), alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
         small = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(24 * s), alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true };

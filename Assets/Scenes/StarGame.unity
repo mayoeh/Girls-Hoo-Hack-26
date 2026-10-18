@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 2d056ac30ecc9e542b26e06133f23602, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -227,7 +227,7 @@ Transform:
   m_GameObject: {fileID: 77206488}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.31686, y: 0.2218, z: 0.31686}
+  m_LocalPosition: {x: 1.5, y: 0.2218, z: 0.31686}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -252,6 +252,7 @@ MonoBehaviour:
   smoothingSpeed: 3
   sensitivity: 0.005
   useAutoPulseTest: 0
+  pulseBreathsPerMinute: 8
   testBreathingInput: 0
 --- !u!114 &77206495
 MonoBehaviour:
@@ -266,15 +267,25 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BreathingUdpReceiver
   starGlowScript: {fileID: 77206493}
+  guideStar: {fileID: 0}
   port: 5005
-  messageText: {fileID: 0}
-  guiFontSize: 28
+  previewPort: 5006
   senderTimeoutSeconds: 3
-  valueFreshSeconds: 2
-  problemHoldSeconds: 2.5
-  invertDirection: 0
-  directionThreshold: 0.03
-  normalizeForGlow: 0
+  invertTrace: 0
+  playbackDelaySeconds: 0.3
+  normalizeWindowSeconds: 12
+  targetBreathsPerMinute: 8
+  toleranceBreathsPerMinute: 2
+  secondsToWin: 20
+  minRateConfidence: 20
+  onStarLit:
+    m_PersistentCalls:
+      m_Calls: []
+  warningPersistSeconds: 1.5
+  showBreathingCoach: 1
+  showDebugPanel: 1
+  showCameraPreview: 1
+  guiFontSize: 28
 --- !u!1 &661236173
 GameObject:
   m_ObjectHideFlags: 0
@@ -515,15 +526,25 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BreathingUdpReceiver
   starGlowScript: {fileID: 1851116158}
+  guideStar: {fileID: 0}
   port: 5005
-  messageText: {fileID: 0}
-  guiFontSize: 28
+  previewPort: 5006
   senderTimeoutSeconds: 3
-  valueFreshSeconds: 2
-  problemHoldSeconds: 2.5
-  invertDirection: 0
-  directionThreshold: 0.03
-  normalizeForGlow: 0
+  invertTrace: 0
+  playbackDelaySeconds: 0.3
+  normalizeWindowSeconds: 12
+  targetBreathsPerMinute: 8
+  toleranceBreathsPerMinute: 2
+  secondsToWin: 20
+  minRateConfidence: 20
+  onStarLit:
+    m_PersistentCalls:
+      m_Calls: []
+  warningPersistSeconds: 1.5
+  showBreathingCoach: 1
+  showDebugPanel: 1
+  showCameraPreview: 1
+  guiFontSize: 28
 --- !u!114 &1851116158
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -543,6 +564,7 @@ MonoBehaviour:
   smoothingSpeed: 3
   sensitivity: 0.005
   useAutoPulseTest: 1
+  pulseBreathsPerMinute: 8
   testBreathingInput: 0
 --- !u!135 &1851116159
 SphereCollider:

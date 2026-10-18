@@ -238,7 +238,7 @@ public class ArmTest : MonoBehaviour
     void OnGUI()
     {
         if (!showDebugGui) return;
-        var style = new GUIStyle(GUI.skin.label) { fontSize = 22 };
+        var style = GameFonts.AsBody(new GUIStyle(GUI.skin.label) { fontSize = 22 });
         GUI.Label(new Rect(20, 20, 900, 40), info, style);
         GUI.Label(new Rect(20, 60, 900, 40), result, style);
         GUI.Label(new Rect(20, 100, 900, 40),
