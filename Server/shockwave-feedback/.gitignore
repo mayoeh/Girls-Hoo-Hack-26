@@ -1,0 +1,2 @@
+# Never commit the Gemini key
+.env

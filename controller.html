@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Arm Controller</title>
+  <style>
+    @font-face { font-family: 'AstroSpace'; src: url('/AstroSpace.ttf') format('truetype'); font-display: swap; }
+    body { font-family: 'AstroSpace', system-ui, sans-serif; letter-spacing: .04em; background: #000 url('/stars.jpg') center / cover fixed; min-height: 100vh; box-sizing: border-box; color: #eee; margin: 0; padding: 16px; text-shadow: 0 1px 4px #000; text-align: center; touch-action: manipulation; user-select: none; }
+    button { width: 100%; font-family: inherit; letter-spacing: inherit; font-size: 22px; padding: 20px; margin: 8px 0; border: 0; border-radius: 12px; color: #fff; }
+    #start { background: #4c8bf5; }
+    #cal { background: #555; }
+    #status { font-size: 15px; margin: 8px 0 12px; opacity: .85; }
+    #dbg { font-family: monospace; font-size: 13px; opacity: .7; letter-spacing: 0; }
+  </style>
+</head>
+<body>
+  <h2>Arm Controller</h2>
+  <div id="status">Tap Start</div>
+  <button id="start">Start</button>
+  <button id="cal">Calibrate (hold phone neutral)</button>
+  <div id="dbg"></div>
+
+<script>
+  const statusEl = document.getElementById('status');
+  const dbg = document.getElementById('dbg');
+  let ws = null;
+  let latest = null;   // [x, y, z, w]
+  let snare = false;
+  let cal = false;
+
+  if (!window.isSecureContext) {
+    statusEl.textContent = 'Warning: page is not HTTPS. Tilt data may be blocked.';
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/?role=phone`);
+    ws.onopen = () => { statusEl.textContent = 'Connected'; };
+    ws.onclose = () => { statusEl.textContent = 'Disconnected, retrying...'; setTimeout(connect, 1000); };
+    ws.onerror = () => { statusEl.textContent = 'Connection error'; };
+  }
+
+  // W3C DeviceOrientation (Z-X'-Y'' intrinsic) -> quaternion [x, y, z, w]
+  function toQuat(alpha, beta, gamma) {
+    const d = Math.PI / 180;
+    const _x = beta * d / 2, _y = gamma * d / 2, _z = alpha * d / 2;
+    const cX = Math.cos(_x), cY = Math.cos(_y), cZ = Math.cos(_z);
+    const sX = Math.sin(_x), sY = Math.sin(_y), sZ = Math.sin(_z);
+    return [
+      sX * cY * cZ - cX * sY * sZ,
+      cX * sY * cZ + sX * cY * sZ,
+      cX * cY * sZ + sX * sY * cZ,
+      cX * cY * cZ - sX * sY * sZ
+    ];
+  }
+
+  async function start() {
+    // iOS needs an explicit permission request from a tap
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r !== 'granted') { statusEl.textContent = 'Motion permission denied'; return; }
+      } catch (e) { statusEl.textContent = 'Permission error: ' + e; return; }
+    }
+
+    window.addEventListener('deviceorientation', (e) => {
+      if (e.alpha === null) { dbg.textContent = 'No orientation data from this device/browser'; return; }
+      latest = toQuat(e.alpha, e.beta, e.gamma);
+      dbg.textContent = `alpha ${e.alpha.toFixed(0)}  beta ${e.beta.toFixed(0)}  gamma ${e.gamma.toFixed(0)}`;
+    });
+
+    connect();
+
+    // Send ~30 times per second
+    setInterval(() => {
+      if (ws && ws.readyState === 1 && latest) {
+        ws.send(JSON.stringify({ q: latest, snare: snare, cal: cal }));
+        snare = false;
+        cal = false;
+      }
+    }, 33);
+
+    document.getElementById('start').style.display = 'none';
+  }
+
+  document.getElementById('start').addEventListener('click', start);
+  document.getElementById('cal').addEventListener('click', () => { cal = true; navigator.vibrate?.(30); });
+</script>
+</body>
+</html>
