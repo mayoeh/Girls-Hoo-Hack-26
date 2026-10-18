@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05060f; }
+      #unity-canvas { display: block; width: 100vw; height: 100vh; outline: none; background: #05060f; }
+      #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 240px;
+                 font: 14px system-ui, sans-serif; color: #cfd6ff; text-align: center; }
+      #bar { margin-top: 10px; height: 4px; background: #1c2040; border-radius: 2px; overflow: hidden; }
+      #fill { height: 100%; width: 0; background: #9fb3ff; transition: width .2s; }
+      #warning { position: fixed; top: 0; left: 0; right: 0; font: 14px system-ui, sans-serif; z-index: 10; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loading">Loading…<div id="bar"><div id="fill"></div></div></div>
+    <div id="warning"></div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      function showBanner(msg, type) {
+        var w = document.querySelector("#warning"), d = document.createElement("div");
+        d.innerHTML = msg;
+        d.style = "padding:10px;background:" + (type == "error" ? "#c0392b" : "#e1b12c") + ";color:#000";
+        w.appendChild(d);
+        if (type != "error") setTimeout(function () { w.removeChild(d); }, 5000);
+      }
+      var buildUrl = "Build";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+        frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+        codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+        showBanner: showBanner,
+      };
+      var script = document.createElement("script");
+      script.src = buildUrl + "/{{{ LOADER_FILENAME }}}";
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (p) {
+          document.querySelector("#fill").style.width = 100 * p + "%";
+        }).then(function () {
+          document.querySelector("#loading").style.display = "none";
+          canvas.focus();
+        }).catch(function (m) { showBanner(m, "error"); });
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>
