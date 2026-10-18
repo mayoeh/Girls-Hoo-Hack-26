@@ -39,12 +39,35 @@
         productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
         showBanner: showBanner,
       };
+      // UI size: the game renders as if the window were UI_HEIGHT pixels tall and is stretched to fill it,
+      // so the on-screen text/UI keeps the same size in a small window, a big window or full screen.
+      // It's recalculated whenever the window resizes or goes full screen (that was the "tiny text in
+      // full screen" bug: it used to be worked out once at load). Smaller number = bigger text.
+      // Try it live: add ?ui=600 (bigger) or ?ui=1000 (smaller) to the address. ?ui=0 turns it off.
+      var UI_HEIGHT = Number(new URLSearchParams(location.search).get('ui') || 720);
+      var unity = null;
+      function uiPixelRatio() {
+        var h = canvas.clientHeight || window.innerHeight;
+        return Math.min(window.devicePixelRatio || 1, UI_HEIGHT / h);
+      }
+      function applyUiScale() {
+        if (!(UI_HEIGHT > 0)) return;
+        var r = uiPixelRatio();
+        config.devicePixelRatio = r;
+        if (unity && unity.Module) unity.Module.devicePixelRatio = r;
+      }
+      applyUiScale();
+      window.addEventListener('resize', applyUiScale);
+      document.addEventListener('fullscreenchange', applyUiScale);
+      document.addEventListener('webkitfullscreenchange', applyUiScale);
       var script = document.createElement("script");
       script.src = buildUrl + "/{{{ LOADER_FILENAME }}}";
       script.onload = function () {
         createUnityInstance(canvas, config, function (p) {
           document.querySelector("#fill").style.width = 100 * p + "%";
-        }).then(function () {
+        }).then(function (instance) {
+          unity = instance;
+          applyUiScale();
           document.querySelector("#loading").style.display = "none";
           canvas.focus();
         }).catch(function (m) { showBanner(m, "error"); });

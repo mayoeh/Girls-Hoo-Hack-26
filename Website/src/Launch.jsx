@@ -95,7 +95,38 @@ export default function Launch({ model, guidePos, guideQuats }) {
     const p1 = origin.clone().addScaledVector(up, Math.max(H * 3, (cross.y - origin.y) * 0.45));
     const away = cross.clone().sub(p1).normalize();
     const p3 = cross.clone().addScaledVector(away, H * 25).addScaledVector(up, H * 30);
-    const curve = new THREE.CatmullRomCurve3([p0, p1, cross, p3], false, 'centripetal');
+
+    // Arrival: line the stack up so its orbiter sits exactly on the orbiter by the Earth (Link_Ride).
+    // Both shuttles are built the same way (Shuttle_Rig_1 in the stack <-> Shuttle_2 at the Earth).
+    let final = null, arriveObj = null, tank = null;
+    const A = cfg.arrive;
+    if (A) {
+      arriveObj = model.getObjectByName(A.object);
+      const rigNode = stack.getObjectByName(A.match[0]);
+      const target = model.getObjectByName(A.match[1]);
+      if (arriveObj && rigNode && target && rigNode.parent === stack) {
+        arriveObj.visible = true; arriveObj.updateMatrixWorld(true);
+        const m = target.matrixWorld.clone().multiply(rigNode.matrix.clone().invert());
+        final = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), scale: new THREE.Vector3() };
+        m.decompose(final.pos, final.quat, final.scale);
+      } else console.warn('[Stellar] launch arrival: could not match', A);
+      tank = A.tank ? stack.getObjectByName(A.tank) : null;
+      if (tank && !tank.userData.restPos) { tank.userData.restPos = tank.position.clone(); tank.userData.restQuat = tank.quaternion.clone(); }
+    }
+    const pts = [p0, p1, cross, p3];
+    if (final) {
+      const back = p3.clone().sub(final.pos).normalize();
+      pts.push(final.pos.clone().addScaledVector(back, H * 5), final.pos.clone());
+    }
+    const crossT = 2 / (pts.length - 1);                  // where the camera pass sits on the curve
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const startScale = stack.getWorldScale(new THREE.Vector3());
+    // Direction the tank drifts off in (away from the orbiter's belly), in the tank's parent space.
+    let tankDir = null;
+    if (tank) {
+      const orb = tank.parent.children.find((c) => c !== tank && c.isMesh);
+      tankDir = orb ? tank.userData.restPos.clone().sub(orb.position).normalize() : new THREE.Vector3(0, 1, 0);
+    }
 
     // Flame + glow at the base of the stack, in the stack's own space.
     const baseWorld = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
@@ -134,7 +165,7 @@ export default function Launch({ model, guidePos, guideQuats }) {
     const veil = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), veilMat);
     veil.renderOrder = 999; veil.frustumCulled = false;
 
-    return { stack, parent, start, q0, H, curve, flame, flameMat, coreMat, smoke, jitter, veil, veilMat, up };
+    return { stack, parent, start, q0, H, curve, crossT, final, arriveObj, tank, tankDir, startScale, flame, flameMat, coreMat, smoke, jitter, veil, veilMat, up };
   }, [model, guidePos, guideQuats]);
 
   // The veil rides on the camera itself (so it never lags behind a fast-moving camera).
@@ -147,17 +178,19 @@ export default function Launch({ model, guidePos, guideQuats }) {
     return () => { camera.remove(rig.veil); };
   }, [rig, camera, scene]);
 
-  const tmp = useMemo(() => ({ p: new THREE.Vector3(), d: new THREE.Vector3(), q: new THREE.Quaternion(), pq: new THREE.Quaternion(), v: new THREE.Vector3() }), []);
+  const tmp = useMemo(() => ({ p: new THREE.Vector3(), d: new THREE.Vector3(), q: new THREE.Quaternion(), pq: new THREE.Quaternion(), v: new THREE.Vector3(), sc: new THREE.Vector3(), ps: new THREE.Vector3(), tq: new THREE.Quaternion(), d2: new THREE.Vector3() }), []);
 
-  // u (0-based guide position) -> how far along the launch curve (0..1). The crossing point is at 2/3.
+  // u (0-based guide position) -> how far along the launch curve (0..1).
+  const lastLeg = (u) => clamp01((u - (cfg.passAt - 1)) / (cfg.endAt - cfg.passAt));   // 0 at the pass, 1 on arrival
   const curveT = (u) => {
-    const a = cfg.startAt - 1, b = cfg.passAt - 1, c = cfg.endAt - 1;
+    const a = cfg.startAt - 1, b = cfg.passAt - 1, X = rig ? rig.crossT : 2 / 3;
     if (u <= a) return 0;
-    if (u <= b) return (2 / 3) * Math.pow((u - a) / (b - a), 1.7);   // accelerating climb
-    return 2 / 3 + (1 / 3) * clamp01((u - b) / (c - b));
+    if (u <= b) { const x = (u - a) / (b - a); return X * (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2) * 0.35 + X * Math.pow(x, 1.6) * 0.65; }   // soft start, steady climb
+    const x = lastLeg(u);
+    return X + (1 - X) * (1 - Math.pow(1 - x, 2.2));            // coasts in and slows down on arrival
   };
 
-  useFrame(({ camera, clock }) => {
+  const update = ({ camera, clock }) => {
     if (!rig) return;
     const u = flightState.u;
     const t = curveT(u);
@@ -166,23 +199,69 @@ export default function Launch({ model, guidePos, guideQuats }) {
     // ----- the stack -----
     if (t <= 0) {
       stack.position.copy(start.pos); stack.quaternion.copy(start.quat); stack.visible = true;
+      rig.sPos = null;
     } else {
       const { p, d, q, pq } = tmp;
       rig.curve.getPoint(Math.min(t, 1), p);
       rig.curve.getTangent(Math.min(Math.max(t, 0.001), 0.999), d);
+      if (rig.final && u > cfg.passAt - 1) {
+        // After the pass it flies just ahead of the camera (so you see it the whole way),
+        // then breaks off and settles into its spot by the Earth.
+        const x = lastLeg(u);
+        const fwd = camera.getWorldDirection(tmp.v);
+        const lead = tmp.ps.copy(camera.position)
+          .addScaledVector(fwd, rig.H * THREE.MathUtils.lerp(cfg.passDistance, cfg.escortDistance ?? 2.2, smooth(x / 0.25)))
+          .addScaledVector(camera.up.clone().applyQuaternion(camera.quaternion), -rig.H * 0.25 * smooth(x / 0.25));
+        const w = smooth((x - 0.78) / 0.22);
+        p.lerpVectors(lead, rig.final.pos, w);
+        tmp.d2.copy(rig.final.pos).sub(lead).normalize();
+        d.copy(fwd).lerp(tmp.d2, smooth((x - 0.7) / 0.2)).normalize();
+      }
       q.setFromUnitVectors(rig.up, d).multiply(rig.q0);          // nose along the flight path
-      if (parent) { parent.worldToLocal(p); parent.getWorldQuaternion(pq).invert(); q.premultiply(pq); }
-      stack.position.copy(p); stack.quaternion.copy(q);
+      tmp.sc.copy(rig.startScale);
+      if (rig.final) {                                           // turn and settle into the orbit pose
+        const w = smooth((lastLeg(u) - 0.75) / 0.25);
+        q.slerp(rig.final.quat, w);
+        tmp.sc.lerp(rig.final.scale, w);
+      }
+      // Glide toward the target pose instead of jumping to it (no jerks when the camera stops at a guide).
+      const now = performance.now(), dt = Math.min(0.1, (now - (rig.lastT || now)) / 1000); rig.lastT = now;
+      if (!rig.sPos || rig.sPos.distanceTo(p) > rig.H * 60 || dt === 0) { rig.sPos = p.clone(); rig.sQuat = q.clone(); }
+      else {
+        const k = 1 - Math.exp(-dt * (cfg.smoothing ?? 4));
+        rig.sPos.lerp(p, k); rig.sQuat.slerp(q, k);
+      }
+      p.copy(rig.sPos); q.copy(rig.sQuat);
+      if (parent) {
+        parent.getWorldScale(tmp.ps);
+        parent.worldToLocal(p); parent.getWorldQuaternion(pq).invert(); q.premultiply(pq);
+        tmp.sc.divide(tmp.ps);
+      }
+      stack.position.copy(p); stack.quaternion.copy(q); stack.scale.copy(tmp.sc);
       stack.visible = u < cfg.endAt - 1;
+    }
+    if (t <= 0) stack.scale.copy(rig.startScale).divide(parent ? parent.getWorldScale(tmp.ps) : tmp.ps.set(1, 1, 1));
+    // The orbiter by the Earth only appears once the launched shuttle has arrived (they swap in place).
+    if (rig.arriveObj) rig.arriveObj.visible = u >= cfg.endAt - 1;
+
+    // External tank separates and drifts away on the way to orbit.
+    if (rig.tank) {
+      const sep = smooth((lastLeg(u) - 0.25) / 0.3);
+      rig.tank.position.copy(rig.tank.userData.restPos).addScaledVector(rig.tankDir, sep * 80);
+      rig.tank.quaternion.copy(rig.tank.userData.restQuat);
+      if (sep > 0) rig.tank.quaternion.multiply(tmp.tq.setFromAxisAngle(rig.up, sep * 0.6));
+      rig.tank.visible = sep < 0.97;
     }
 
     // ----- engines -----
-    const ignite = smooth((u - (cfg.startAt - 1 - 0.25)) / 0.25);
+    const lead = cfg.igniteLead ?? 0.25, ignite = smooth((u - (cfg.startAt - 1 - lead)) / lead);
     rig.flame.visible = ignite > 0.01 && stack.visible;
     if (rig.flame.visible) {
       const flick = 0.85 + 0.15 * Math.sin(clock.elapsedTime * 40) * Math.sin(clock.elapsedTime * 23);
       rig.flame.scale.set(1, (0.4 + 0.6 * ignite) * flick * (1 + 0.8 * clamp01(t * 3)), 1);
-      rig.flameMat.opacity = 0.9 * ignite; rig.coreMat.opacity = 0.95 * ignite;
+      const cutoff = 1 - smooth((lastLeg(u) - 0.2) / 0.2);   // engines off as the tank separates
+      rig.flameMat.opacity = 0.9 * ignite * cutoff; rig.coreMat.opacity = 0.95 * ignite * cutoff;
+      rig.flame.visible = cutoff > 0.01;
     }
 
     // ----- smoke: puffs along the path behind the shuttle, plus a cloud at the pad -----
@@ -218,7 +297,9 @@ export default function Launch({ model, guidePos, guideQuats }) {
       rig.veil.scale.set(h * camera.aspect, h, 1);
       rig.veilMat.opacity = vo;
     }
-  });
+  };
+  // Runs right after the camera moves each frame (see Scene.jsx), so the shuttle never lags behind it.
+  useEffect(() => { flightState.afterCamera = update; return () => { if (flightState.afterCamera === update) flightState.afterCamera = null; }; });
 
   if (!rig) return null;
   return (

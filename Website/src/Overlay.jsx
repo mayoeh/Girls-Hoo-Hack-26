@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { POPUPS, LINKS, SNAP_RANGE, SNAP_DELAY, END_HINT } from './config';
+import { POPUPS, LINKS, SNAP_RANGE, SNAP_DELAY, SNAP_TO_GUIDES, END_HINT } from './config';
 import { flightState } from './flightState';
 
 const gameInfo = (game) => Object.values(LINKS).find((l) => l.game === game);
@@ -52,7 +52,7 @@ export default function Overlay({ done }) {
             const game = h.slice(5), info = gameInfo(game);
             label = info?.label ?? game;
             who = `${info?.who ?? ''}  |  ${done[game] ? 'Star lit' : 'Not lit yet'}`;
-            cta = 'Click to fly back';
+            cta = done[game] ? 'Click to play again' : 'Click to play';
           } else {
             const info = LINKS[h];
             label = info.label;
@@ -84,7 +84,7 @@ export default function Overlay({ done }) {
         const max = el.scrollHeight - el.clientHeight;
         if (max <= 0) return;
         const u = (el.scrollTop / max) * last;
-        const points = [0, last, ...POPUPS.map((p) => p.at - 1)];
+        const points = [0, last, ...POPUPS.map((p) => p.at - 1), ...(SNAP_TO_GUIDES ? [...Array(last + 1).keys()] : [])];
         let best = null, bd = Infinity;
         // Only glide forward (the way you were scrolling) - never pull you back to where you came from.
         for (const s of points) { const d = Math.abs(s - u); if ((s - u) * dir >= -0.02 && d < bd) { bd = d; best = s; } }
@@ -109,7 +109,7 @@ export default function Overlay({ done }) {
       {POPUPS.map((p, i) => {
         const link = p.link && LINKS[p.link];
         return (
-          <section key={i} ref={(el) => (cards.current[i] = el)} className={`card card-${p.side || 'left'}${p.image ? ' card-portrait' : ''}`}>
+          <section key={i} ref={(el) => (cards.current[i] = el)} className={`card card-${p.side || 'left'}${p.image ? ' card-portrait' : ''}${p.game_card ? ' card-game' : ''}`}>
             {p.image && (
               <div className="photo">
                 <img src={p.image} alt={p.title || ''} loading="eager"
@@ -132,7 +132,10 @@ export default function Overlay({ done }) {
           </section>
         );
       })}
-      {END_HINT && <div className="end-hint" ref={hint}>{END_HINT}</div>}
+      <div className="end-hint" ref={hint}>
+        {END_HINT && <div>{END_HINT}</div>}
+        <a className="credits-link" href="credits.html">Asset credits</a>
+      </div>
       <div className="tip" ref={tip}>
         <div className="tip-label" />
         <div className="tip-who" />

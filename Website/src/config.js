@@ -12,7 +12,7 @@ export const MODEL_URL = 'models/SiteMap.glb';
 export const GUIDES = 'auto';
 
 // How many screen-heights of scrolling between two guides (bigger = slower flight).
-export const SCROLL_PER_GUIDE = 0.9;
+export const SCROLL_PER_GUIDE = 1.6;
 
 // Vertical field of view, degrees (Unity's Scene view uses 60).
 export const FOV = 60;
@@ -34,8 +34,9 @@ export const SKY_ZONES = ['SkyZone_1', 'SkyZone_2'];
 // Clickable 3D objects -> pages. `game` is the key that game saves when it's completed.
 export const LINKS = {
   Link_Leavitt: { label: 'Pulse', who: 'Henrietta Leavitt', href: 'games/star/', game: 'star' },
-  Link_Ride:    { label: 'Orbital Catch',         who: 'Sally Ride',        href: 'games/satellite/', game: 'satellite' },
-  Link_Jackson: { label: 'Turbulent Trial',       who: 'Mary Jackson',      href: 'games/shockwave/', game: 'shockwave' },
+  // href = the folder in public/games/ (the page's address). game = the key the game saves when won (don't change).
+  Link_Ride:    { label: 'Orbital Catch',         who: 'Sally Ride',        href: 'games/orbital-catch/',    game: 'satellite' },
+  Link_Jackson: { label: 'Turbulent Trials',      who: 'Mary Jackson',      href: 'games/turbulent-trials/', game: 'shockwave' },
 };
 
 // Ground under the launch pad (a big soft-edged disk). Set GROUND = null to remove it.
@@ -44,6 +45,13 @@ export const GROUND = { under: 'Container Bases', radius: 6000, color: '#d6dbc4'
 // Earth: scale the curved Earth patch up so its edges stay out of view (1 = as exported).
 // It grows around its top point, so it stays the same height under the camera.
 export const EARTH = { name: 'Earth', scale: 3 };
+
+// Hidden until the camera gets close: fades in over `fade` guides, fully there at `at`.
+// `at` can be a guide name ('CamGuide_15'), a marker name, or a guide number.
+// (The orbiting shuttle, Link_Ride, appears when the launched shuttle arrives - see LAUNCH.endAt.)
+export const REVEAL = [
+  { objects: ['Earth', 'Sun'], at: 'CamGuide_15', fade: 0.25 },
+];
 
 // Make clickable objects bigger than in Unity so they read from far away (1 = as exported).
 // The Leavitt "Pulsing Star" is only 2.5 units across and the camera never gets closer than ~4000.
@@ -59,22 +67,24 @@ export const FRAME_STAR_MATERIAL = 'Mat_Star_Constellation';
 
 // Shuttle launch (scroll-driven). Each timing is a guide number (like `at` in POPUPS) or a Unity marker
 // name with an optional offset in guides, e.g. 'Popup_Ride-0.6' = a bit before the Ride popup marker.
-//   startAt: ignition + lift-off begins     passAt: it flies right past the camera (put this on the sky change)
+//   startAt: lift-off begins (after the Turbulent Trials card at CamGuide_06)   igniteLead: engines light this many guides before lift-off     passAt: it flies right past the camera (put this on the sky change)
 //   endAt:   it has arrived at the orbit spot (Satellite Catch shuttle)   passDistance: how close it passes (in shuttle-heights)
 //   veilStrength: how much the exhaust covers the screen at passAt (0 = not at all, 1 = fully)
+//   smoothing: how softly the shuttle follows its path (higher = snappier, lower = floatier)
 // Set LAUNCH = null to turn the launch off.
 export const LAUNCH = {
-  object: 'Link_Jackson', startAt: 'Popup_Jackson_4+0.2', passAt: 'SkyZone_1', endAt: 'Popup_Ride_1-0.6',
-  fallback: { startAt: 3.2, passAt: 5, endAt: 7.4 },   // used when those markers aren't in the model
-  passDistance: 0.9, veilWidth: 0.55, veilStrength: 0.92,
+  object: 'Link_Jackson', startAt: 'CamGuide_06+0.12', igniteLead: 0.1, passAt: 'SkyZone_1', endAt: 'CamGuide_15-0.35',
+  fallback: { startAt: 6.12, passAt: 6.55, endAt: 14.65 },   // used when those markers aren't in the model
+  passDistance: 0.9, veilWidth: 0.55, smoothing: 4, veilStrength: 0.92,
   // Where it ends up: the stack lines up with the Satellite Catch shuttle and swaps with it.
   arrive: { object: 'Link_Ride', match: ['Shuttle_Rig_1', 'Shuttle_2'], tank: 'Shuttle_Tank_1' },
 };
 
 // Scroll snapping: when the visitor stops scrolling near one of these guide numbers, the page
 // glides to it. Defaults to every popup's `at` plus the end. Set SNAP_RANGE to 0 to turn snapping off.
-export const SNAP_RANGE = 0.45;   // how close (in guides) you must stop for it to snap
-export const SNAP_DELAY = 160;    // ms of no scrolling before it snaps
+export const SNAP_RANGE = 1.05;   // how far ahead (in guides) it will glide to the next stop. 1+ = always stop at the next guide
+export const SNAP_DELAY = 140;    // ms of no scrolling before it snaps
+export const SNAP_TO_GUIDES = true;   // stop at every camera guide (not just popups)
 
 // Little hint at the very end (no card over the constellation). Set to '' to hide it.
 export const END_HINT = 'Hover a star to see its mission';
@@ -83,7 +93,6 @@ export const END_HINT = 'Hover a star to see its mission';
 //   marker: name of a Popup_ empty in Unity. The card shows when the camera passes closest to it.
 //   at:     guide number (1 = CamGuide_01) - used when there's no marker, or the marker isn't in the model.
 //   offset: optional nudge in guides (e.g. 0.3 = a bit later than the marker).
-//   image:  local picture (public/images/...). imageUrl: online copy used if the local file is missing.
 //   meta:   small line under the name.   cite: { label, href } small source link at the bottom.
 //   game:   which game this card belongs to (clicking that belt star at the end flies back to the first one).
 // Decimals are fine (5.5 = halfway between guide 5 and 6). `side`: 'left' | 'right' | 'center'.
@@ -93,16 +102,14 @@ export const POPUPS = [
     body: "Three missions. Three women who shaped how we explore space. Complete each one to light a star in Orion's belt.",
     hint: 'Scroll to launch' },
 
-  // ---- Mission 1: Mary Jackson - Turbulent Trial ----
+  // ---- Mission 1: Mary Jackson - Turbulent Trials ----
   { marker: 'Popup_Jackson_1',
     at: 1.6,
     side: 'left',
     game: 'shockwave',
-    kicker: 'Mission 1 - Turbulent Trial',
+    kicker: 'Mission 1',
     title: 'Mary Jackson',
     meta: 'Engineer  \u2219  1921 - 2005',
-    image: 'images/jackson.jpg',
-    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bd/Mary_Jackson_1979_Portrait_%28LRC-1979-B701_P_F002-07086%29.jpg/480px-Mary_Jackson_1979_Portrait_%28LRC-1979-B701_P_F002-07086%29.jpg',
     cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
   { marker: 'Popup_Jackson_2',
     at: 2.05,
@@ -124,19 +131,18 @@ export const POPUPS = [
     game: 'shockwave',
     kicker: 'Mary Jackson',
     body: "She was passionate about promoting women joining the STEM workforce and inspired many through her work, with her story also being told in the award-winning movie \"Hidden Figures.\"",
-    link: 'Link_Jackson',
     cite: { label: 'nasa.gov', href: 'https://www.nasa.gov/people/mary-w-jackson-biography/' } },
+  { marker: 'CamGuide_06', game_card: true, at: 0, side: 'right', kicker: 'Mission 1', title: 'Turbulent Trials',
+    body: "Shape the nose of a model, fire the supersonic wind tunnel, and keep the airflow smooth as far back as you can.", link: 'Link_Jackson' },
 
   // ---- Mission 2: Sally Ride - Orbital Catch ----
   { marker: 'Popup_Ride_1',
     at: 7.8,
     side: 'right',
     game: 'satellite',
-    kicker: 'Mission 2 - Orbital Catch',
+    kicker: 'Mission 2',
     title: 'Sally Ride',
     meta: 'Astronaut and Physicist  \u2219  1951 - 2012',
-    image: 'images/ride.jpg',
-    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Sally_Ride_%281984%29.jpg/480px-Sally_Ride_%281984%29.jpg',
     cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
   { marker: 'Popup_Ride_2',
     at: 8.25,
@@ -158,19 +164,18 @@ export const POPUPS = [
     game: 'satellite',
     kicker: 'Sally Ride',
     body: "Throughout her life, she was passionate about encouraging girls and young women to get involved in STEM, and she has served as an inspiration for thousands.",
-    link: 'Link_Ride',
     cite: { label: 'science.nasa.gov', href: 'https://science.nasa.gov/people/sally-ride/' } },
+  { marker: 'CamGuide_15', game_card: true, at: 0, side: 'left', kicker: 'Mission 2', title: 'Orbital Catch',
+    body: "Your phone becomes the shuttle's robotic arm. Tilt it to release the satellite into orbit, then catch it again.", link: 'Link_Ride' },
 
   // ---- Mission 3: Henrietta Leavitt - Pulse ----
   { marker: 'Popup_Leavitt_1',
     at: 10.6,
     side: 'left',
     game: 'star',
-    kicker: 'Mission 3 - Pulse',
+    kicker: 'Mission 3',
     title: 'Henrietta Leavitt',
     meta: 'Astronomer  \u2219  1868 - 1921',
-    image: 'images/leavitt.jpg',
-    imageUrl: 'https://cdn.britannica.com/66/158566-004-EBCD4212/Henrietta-Swan-Leavitt.jpg',
     cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
   { marker: 'Popup_Leavitt_2',
     at: 11.05,
@@ -199,6 +204,7 @@ export const POPUPS = [
     game: 'star',
     kicker: 'Henrietta Leavitt',
     body: "Despite her limited recognition during her lifetime, she serves as an inspiration for breaking through gender-based barriers and making an impact on the world of astronomical research.",
-    link: 'Link_Leavitt',
     cite: { label: 'womensinnovations.org', href: 'https://womensinnovations.org/women-innovator/henrietta-swan-leavitt/' } },
+  { marker: 'CamGuide_24', game_card: true, at: 0, side: 'right', kicker: 'Mission 3', title: 'Pulse',
+    body: "Breathe in rhythm with a pulsing star. Your breathing is read live from your webcam.", link: 'Link_Leavitt' },
 ];

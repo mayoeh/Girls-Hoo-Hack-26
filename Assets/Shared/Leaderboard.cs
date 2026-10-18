@@ -55,6 +55,8 @@ public class Leaderboard
     {
         score = newScore; detailJson = detailJsonObject;
         hasScore = true; submitted = false; message = ""; rank = 0; newBest = false;
+        // Finishing a game lights its star on the Stellar website (WebGL builds on stellargame.us).
+        StellarProgress.MarkComplete(game == "windtunnel" ? "shockwave" : game);
         Refresh();
     }
 

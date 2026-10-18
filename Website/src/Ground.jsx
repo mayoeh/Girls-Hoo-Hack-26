@@ -38,7 +38,7 @@ export default function Ground({ model }) {
     map.repeat.set(GROUND.radius / 400, GROUND.radius / 400);
     const geo = new THREE.CircleGeometry(GROUND.radius, 96);
     geo.setAttribute('uv2', geo.attributes.uv);
-    const mat = new THREE.MeshStandardMaterial({ map, alphaMap, transparent: true, depthWrite: true, roughness: 1, metalness: 0, color: GROUND.color });
+    const mat = new THREE.MeshStandardMaterial({ map, alphaMap, transparent: true, depthWrite: true, roughness: 1, metalness: 0, color: GROUND.color, emissive: GROUND.color, emissiveMap: map, emissiveIntensity: GROUND.glow ?? 0.45 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(center.x, box.min.y - (GROUND.sink ?? 1), center.z);

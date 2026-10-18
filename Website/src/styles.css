@@ -67,6 +67,10 @@ canvas { display: block; }
   text-shadow: 0 1px 6px #000; white-space: nowrap;
 }
 
+.end-hint { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.credits-link { pointer-events: auto; font-size: 0.75rem; letter-spacing: 0.12em; color: rgba(185, 200, 214, 0.75); text-decoration: underline; text-underline-offset: 3px; }
+.credits-link:hover { color: var(--gold); }
+
 .tip { position: fixed; left: 0; top: 0; padding: 0.65rem 0.85rem; border-radius: 4px; background: var(--panel); border: 1px solid var(--edge); opacity: 0; transition: opacity 0.15s; pointer-events: none; }
 .tip-label { font-family: var(--head); letter-spacing: 0.04em; color: #fff; }
 .tip-who { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; }
@@ -79,6 +83,23 @@ canvas { display: block; }
 .loading-bar > div { height: 100%; background: linear-gradient(90deg, var(--gold), var(--orange)); transition: width 0.2s; }
 .loading-pct { color: var(--muted); font-size: 0.9rem; letter-spacing: 0.08em; }
 
+/* Game card: its own centered card with a big title and the Play button */
+.card-game { width: min(380px, calc(100vw - 32px)); text-align: left; border-color: rgba(255, 217, 102, 0.7); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 46px rgba(255, 217, 102, 0.22); }
+.card-game h2 { font-size: clamp(2rem, 4vw, 2.8rem); color: var(--gold); text-shadow: 0 0 22px rgba(255, 217, 102, 0.45); margin-bottom: 0.8rem; }
+.card-game .kicker { font-size: 0.95rem; }
+.card-game .btn { font-size: 1.05rem; padding: 0.8rem 1.4rem; }
+
+/* Portrait card: photo beside the name */
+.card-portrait { display: flex; gap: 1.1rem; align-items: center; width: min(520px, calc(100vw - 32px)); }
+.card-portrait .photo { flex: none; width: 132px; height: 170px; border-radius: 4px; overflow: hidden; border: 1px solid var(--edge); background: #111; box-shadow: 0 0 18px rgba(255, 217, 102, 0.15); }
+.card-portrait .photo img { width: 100%; height: 100%; object-fit: cover; display: block; filter: grayscale(0.15) contrast(1.05); }
+.card-portrait h2 { margin-bottom: 0.35rem; }
+.meta { color: var(--blue); font-size: 0.92rem; letter-spacing: 0.04em; margin-bottom: 0.6rem; }
+.card-text { min-width: 0; }
+.cite { display: block; margin-top: 0.9rem; font-size: 0.72rem; color: rgba(185, 200, 214, 0.7); text-decoration: underline; text-underline-offset: 2px; }
+.cite:hover { color: var(--gold); }
+
 @media (max-width: 640px) {
+  .card-portrait .photo { width: 90px; height: 116px; }
   .card-left, .card-right { left: 16px; right: 16px; width: auto; top: auto; bottom: 24px; margin-top: 0; }
 }

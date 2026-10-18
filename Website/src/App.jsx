@@ -35,7 +35,9 @@ function Loading() {
 
 export default function App() {
   const done = useMemo(readProgress, []);
-  const pages = (GUIDES.length - 1) * SCROLL_PER_GUIDE + 1;
+  // Scroll length follows the number of camera guides found in the model.
+  const [guideCount, setGuideCount] = useState(Array.isArray(GUIDES) ? GUIDES.length : 13);
+  const pages = (guideCount - 1) * SCROLL_PER_GUIDE + 1;
   return (
     <>
       <Canvas
@@ -47,7 +49,7 @@ export default function App() {
         <Suspense fallback={null}>
           <ScrollControls pages={pages} damping={0.22}>
             <SheetProvider sheet={sheet}>
-              <Scene done={done} />
+              <Scene done={done} onGuideCount={setGuideCount} />
             </SheetProvider>
           </ScrollControls>
           {!new URLSearchParams(location.search).has('nofx') && <Effects />}

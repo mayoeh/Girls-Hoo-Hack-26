@@ -31,6 +31,8 @@ Secrets for the game API go in `Server/game-api/.env` (copy `.env.example`). It'
 
     .\Server\deploy\deploy-arm-relay.ps1     # after changing arm-relay
     .\Server\deploy\deploy-game-api.ps1      # after changing game-api or its .env
+    .\Server\deploy\deploy-website.ps1       # after changing the website or copying in new game builds
+                                             # -> https://149-28-227-46.sslip.io/stellar/
 
 Enter the root password when asked. If PowerShell blocks the script:
 `powershell -ExecutionPolicy Bypass -File .\Server\deploy\deploy-game-api.ps1`

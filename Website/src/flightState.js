@@ -17,7 +17,7 @@ export const flightState = {
   },
   // Fly back to the popup of a game ('star' | 'satellite' | 'shockwave').
   flyToGame(game) {
-    const p = POPUPS.find((p) => p.link && LINKS[p.link]?.game === game);
+    const p = POPUPS.find((p) => p.game === game) || POPUPS.find((p) => p.link && LINKS[p.link]?.game === game);
     if (p) this.flyTo(p.at - 1);
   },
 };

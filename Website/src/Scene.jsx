@@ -6,7 +6,7 @@ import { PerspectiveCamera as TheatreCamera } from '@theatre/r3f';
 import { val } from '@theatre/core';
 import { sheet, flight, look } from './theatre';
 import { flightState } from './flightState';
-import { MODEL_URL, GUIDES, FOV, LINKS, LINK_SCALE, STARS, FRAME_LINE_MATERIAL, FRAME_STAR_MATERIAL, SKY_ZONES, POPUPS, LAUNCH, EARTH } from './config';
+import { MODEL_URL, GUIDES, FOV, LINKS, LINK_SCALE, STARS, FRAME_LINE_MATERIAL, FRAME_STAR_MATERIAL, SKY_ZONES, POPUPS, LAUNCH, EARTH, REVEAL } from './config';
 import Sky from './Sky';
 import Launch from './Launch';
 import Ground from './Ground';
@@ -24,8 +24,8 @@ function useTheatreValues(obj) {
 // All CamGuide_* objects in flight order: by number, CamGuide_End last.
 function findGuides(model) {
   const found = [];
-  model.traverse((o) => { if (/^CamGuide_/.test(o.name)) found.push(o.name); });
-  const key = (n) => (/_End$/i.test(n) ? Infinity : parseFloat(n.replace(/^CamGuide_/, '')) || 0);
+  model.traverse((o) => { if (/^CamGuide(_\d+|_?End)$/i.test(o.name)) found.push(o.name); });
+  const key = (n) => (/End$/i.test(n) ? Infinity : parseFloat(n.replace(/^CamGuide_/, '')) || 0);
   return [...new Set(found)].sort((a, b) => key(a) - key(b));
 }
 
@@ -78,6 +78,7 @@ export default function Scene({ done, onGuideCount }) {
     // Every Popup_* and SkyZone_* marker -> its spot on the flight.
     const markerAt = {};
     model.traverse((o) => { if (/^(Popup_|SkyZone_)/.test(o.name)) markerAt[o.name] = pathU(o.getWorldPosition(new THREE.Vector3())); });
+    guideNames.forEach((n, i) => { markerAt[n] = i; });   // guides can be used as markers too ('CamGuide_15')
 
     const zoneAt = SKY_ZONES.map((n) => {
       if (markerAt[n] === undefined) { missing.push(n); return Infinity; }
@@ -158,7 +159,18 @@ export default function Scene({ done, onGuideCount }) {
     const sunPos = sun ? sun.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(-1, 0.3, 0.4).multiplyScalar(10000);
     const linkMeshes = {};
     for (const [mesh, name] of linkOf) (linkMeshes[name] ||= []).push(mesh);
-    return { guideNames, pts, curve, quats, count: pts.length, markerAt, zoneAt, frameMats: [...frameMats], starMats, linkOf, linkMeshes, sunPos, missing };
+    // Objects that stay hidden until the camera gets close (REVEAL in config).
+    const reveal = [];
+    for (const r of REVEAL || []) {
+      const at = resolveAt(r.at, markerAt, Infinity) - 1;
+      for (const n of r.objects) {
+        const o = get(n); if (!o) { missing.push(n); continue; }
+        const mats = [];
+        o.traverse((c) => { if (c.isMesh) { c.material = c.material.clone(); mats.push(c.material); c.material.userData.revealOpacity = c.material.opacity; } });
+        reveal.push({ o, mats, at, fade: r.fade ?? 0.6 });
+      }
+    }
+    return { reveal, guideNames, pts, curve, quats, count: pts.length, markerAt, zoneAt, frameMats: [...frameMats], starMats, linkOf, linkMeshes, sunPos, missing };
   }, [model]);
 
   flightState.count = rig.count;
@@ -197,9 +209,24 @@ export default function Scene({ done, onGuideCount }) {
     flightState.afterCamera?.(state);
   });
 
+  // ---------- hidden-until-close objects fade in ----------
+  useFrame(() => {
+    for (const r of rig.reveal) {
+      const a = smoothstep(r.at - r.fade, r.at, flightState.u);
+      r.o.visible = a > 0.005;
+      for (const m of r.mats) {
+        const full = a >= 0.999;
+        if (m.transparent !== !full) { m.transparent = !full; m.needsUpdate = true; }
+        m.opacity = m.userData.revealOpacity * a;
+        m.depthWrite = full;
+      }
+    }
+  });
+
   // ---------- stars, frame, hover glow ----------
   const allDone = Object.values(done).every(Boolean);
   const onColor = useMemo(() => new THREE.Color('#dfe8ff'), []);
+  const beltColor = useMemo(() => new THREE.Color('#ffe2a0'), []);   // lit game stars: warm gold
   const frameColor = useMemo(() => new THREE.Color('#9db8ff'), []);
   const hoverColor = useMemo(() => new THREE.Color('#7f9cff'), []);
   const pulseColor = useMemo(() => new THREE.Color('#fff2c4'), []);
@@ -211,7 +238,7 @@ export default function Scene({ done, onGuideCount }) {
       if (!m.emissive) return;
       const hovered = flightState.hover === 'star:' + game;
       if (done[game]) {
-        m.emissive.copy(onColor);
+        m.emissive.copy(beltColor);
         m.emissiveIntensity = THREE.MathUtils.lerp(1.5, 7 + 1.2 * Math.sin(t * 2.2 + k * 2), reveal) + (hovered ? 4 : 0);
       } else if (hovered) {
         m.emissive.copy(hoverColor);
@@ -255,6 +282,7 @@ export default function Scene({ done, onGuideCount }) {
   // Link_ objects open their game. Belt stars (Star_*) show their game and fly back to its popup.
   const starGame = useMemo(() => Object.fromEntries(Object.entries(STARS).map(([g, n]) => [n, g])), []);
   const targetOf = (obj) => {
+    for (let q = obj; q; q = q.parent) if (!q.visible) return null;   // hidden things can't be clicked (e.g. the launched stack once it has swapped)
     for (let p = obj; p; p = p.parent) {
       if (LINKS[p.name]) return p.name;
       if (starGame[p.name]) return 'star:' + starGame[p.name];
@@ -275,8 +303,10 @@ export default function Scene({ done, onGuideCount }) {
       const n = targetOf(e.object);
       if (!n) return;
       e.stopPropagation();
-      if (n.startsWith('star:')) flightState.flyToGame(n.slice(5));
-      else window.location.href = LINKS[n].href;
+      if (n.startsWith('star:')) {
+        const l = Object.values(LINKS).find((x) => x.game === n.slice(5));
+        if (l) window.location.href = l.href;
+      } else window.location.href = LINKS[n].href;
     },
   };
 
