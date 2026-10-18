@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 
-// Drag the nose dots in the Game view. M toggles mirroring, + / - add or remove dots.
+// Drag the nose dots in the Game view. Mirroring and dot count are on the TOOLS panel (M and +/- also work).
 // Dot index: 0 = tip, 1..n = shape points, last = shoulder (shown, not draggable).
 public class NoseEditor : MonoBehaviour
 {
@@ -22,7 +22,6 @@ public class NoseEditor : MonoBehaviour
     public Key mirrorKey = Key.M;
     public Key addDotKey = Key.Equals;     // the +/= key
     public Key removeDotKey = Key.Minus;
-    public bool showHelp = true;
 
     public event System.Action EditStarted, EditFinished;   // step 5 uses these for undo
     public bool IsDragging => dragIndex >= 0;
@@ -78,17 +77,25 @@ public class NoseEditor : MonoBehaviour
     public void SetEditing(bool on)
     {
         enabled = on;
-        foreach (var r in top) if (r) r.enabled = on;
-        foreach (var r in bottom) if (r) r.enabled = on;
+        ShowDots(on);
         hoverIndex = -1;
     }
+
+    // Shows or hides every dot this editor owns, including any left over from a rebuild.
+    public void ShowDots(bool on)
+    {
+        foreach (var r in GetComponentsInChildren<Renderer>(true))
+            if (r && r.enabled != on) r.enabled = on;
+    }
+
+    void OnDisable() => ShowDots(false);
 
     // ---------- keys ----------
 
     void HandleKeys()
     {
         var kb = Keyboard.current;
-        if (kb == null || UIPanels.Typing) return;
+        if (kb == null || UIPanels.Typing || Leaderboard.Typing) return;
         if (kb[mirrorKey].wasPressedThisFrame) ToggleMirror();
         if (kb[addDotKey].wasPressedThisFrame || kb[Key.NumpadPlus].wasPressedThisFrame) ChangePointCount(+1);
         if (kb[removeDotKey].wasPressedThisFrame || kb[Key.NumpadMinus].wasPressedThisFrame) ChangePointCount(-1);
@@ -239,6 +246,7 @@ public class NoseEditor : MonoBehaviour
         var r = go.GetComponent<Renderer>();
         r.sharedMaterial = dotMaterial;
         r.shadowCastingMode = ShadowCastingMode.Off;
+        r.enabled = enabled;   // never show dots while the editor is off (testing / final results)
         return r;
     }
 
@@ -281,16 +289,4 @@ public class NoseEditor : MonoBehaviour
         return c;
     }
 
-    GUIStyle helpStyle;
-
-    void OnGUI()
-    {
-        if (!showHelp || rocket == null) return;
-        string text = $"Drag dots to shape   ·   [M] mirroring: {(rocket.shape.mirrored ? "ON" : "OFF")}" +
-                      $"   ·   [+/-] dots per side: {rocket.shape.points.Count}" +
-                      $"   ·   scroll while dragging: falloff {falloff:0.00}" +
-                      "   ·   [S] save & test";
-        helpStyle ??= ShockwaveFonts.AsBody(new GUIStyle(GUI.skin.label));
-        GUI.Label(new Rect(12, Screen.height - 30, Screen.width - 24, 24), text, helpStyle);
-    }
-}
+}

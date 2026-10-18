@@ -67,5 +67,6 @@
         "*.sln": "*.csproj",
         "*.slnx": "*.csproj"
     },
-    "dotnet.defaultSolution": "Girls Hoo Hack 26.slnx"
+    "dotnet.defaultSolution": "Girls Hoo Hack 26.slnx",
+    "cmake.sourceDirectory": "C:/Users/mayoe/OneDrive/Desktop/Girls Hoo Hack 26/BreathingSender"
 }

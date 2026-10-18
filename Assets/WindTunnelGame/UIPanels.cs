@@ -12,6 +12,13 @@ public static class UIPanels
 
     public static bool Typing;   // true while a number box has keyboard focus
 
+    // Modeling-screen layout, so the side columns never run into the NOSE SHAPE panel at the bottom.
+    // Set by ShapeDashboard each repaint (GUI coordinates).
+    public static float ToolsBottom = 110f;                 // bottom edge of the TOOLS panel (top-left)
+    public static float BottomPanelTop = float.MaxValue;    // top edge of the NOSE SHAPE panel
+    public static float ModelsBottom;                       // bottom edge of the MODELS panel (top-right)
+    public static float TipBottom;                          // bottom edge of the LAB PARTNER panel (0 = not shown)
+
     // guiRect uses GUI coordinates (origin top-left). slot lets one component report several panels.
     public static void Set(Object owner, Rect guiRect, int slot = 0) => rects[(owner.GetInstanceID(), slot)] = guiRect;
 
@@ -52,6 +59,14 @@ public static class UIPanels
         PlayerPrefs.SetInt("panel." + key, 0);
     }
 
+    // Collapse a panel from code (e.g. the tunnel panels while a run is in progress). The player can reopen it.
+    public static void Close(string key)
+    {
+        pendingToggles.Remove(key);
+        collapsed[key] = true;
+        PlayerPrefs.SetInt("panel." + key, 1);
+    }
+
     // Panel title row with a collapse button. Returns true if the panel is open (draw its contents).
     public static bool Header(string key, string title, GUIStyle titleStyle)
     {
@@ -64,6 +79,7 @@ public static class UIPanels
         }
 
         bool open = IsOpen(key);
+        GUILayout.Space(3f);   // breathing room above the title
         GUILayout.BeginHorizontal();
         GUILayout.Label(title, titleStyle);
         GUILayout.FlexibleSpace();

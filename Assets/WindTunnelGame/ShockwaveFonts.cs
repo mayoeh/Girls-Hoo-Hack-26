@@ -1,47 +1,27 @@
 using UnityEngine;
 
-// Shared fonts for Shockwave's on-screen panels, same pair as Catch:
-// Astro Space for titles and panel headings, Elegant Typewriter for everything else.
-// In the Editor they load straight from Assets/Fonts. For a build, TestBench keeps
-// references to both fonts in the scene and hands them over in Awake.
+// Shockwave's font helper, now a thin wrapper around GameFonts (shared by every game):
+// Astro Space for titles, headings and bold text, Clean Typewriter for everything else.
 public static class ShockwaveFonts
 {
-    public const string TitlePath = "Assets/Fonts/AstroSpace.ttf";
-    public const string BodyPath = "Assets/Fonts/ELEGANT TYPEWRITER Regular.ttf";
-
-    static Font title, body;
+    public const string TitlePath = GameFonts.TitlePath;
+    public const string BodyPath = GameFonts.BodyPath;
 
     public static Font Title
     {
-        get { if (!title) title = Load(TitlePath); return title; }
-        set { if (value) title = value; }
+        get => GameFonts.Title;
+        set => GameFonts.Title = value;
     }
 
     public static Font Body
     {
-        get { if (!body) body = Load(BodyPath); return body; }
-        set { if (value) body = value; }
+        get => GameFonts.Body;
+        set => GameFonts.Body = value;
     }
 
     // Heading style: Astro Space, without Unity's fake bold (it smears the letters).
-    public static GUIStyle AsTitle(GUIStyle s)
-    {
-        if (Title) { s.font = Title; s.fontStyle = FontStyle.Normal; }
-        return s;
-    }
+    public static GUIStyle AsTitle(GUIStyle s) => GameFonts.AsTitle(s);
 
-    public static GUIStyle AsBody(GUIStyle s)
-    {
-        if (Body) s.font = Body;
-        return s;
-    }
-
-    static Font Load(string path)
-    {
-#if UNITY_EDITOR
-        return UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(path);
-#else
-        return null;
-#endif
-    }
+    // Regular text. Styles marked Bold count as headings and get Astro Space.
+    public static GUIStyle AsBody(GUIStyle s) => GameFonts.Apply(s);
 }

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no">
+    <title>Turbulent Trials</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05060f; }
+      #unity-canvas { display: block; width: 100vw; height: 100vh; outline: none; background: #05060f; }
+      #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 240px;
+                 font: 14px system-ui, sans-serif; color: #cfd6ff; text-align: center; }
+      #bar { margin-top: 10px; height: 4px; background: #1c2040; border-radius: 2px; overflow: hidden; }
+      #fill { height: 100%; width: 0; background: #9fb3ff; transition: width .2s; }
+      #warning { position: fixed; top: 0; left: 0; right: 0; font: 14px system-ui, sans-serif; z-index: 10; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loading">Loading…<div id="bar"><div id="fill"></div></div></div>
+    <div id="warning"></div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      function showBanner(msg, type) {
+        var w = document.querySelector("#warning"), d = document.createElement("div");
+        d.innerHTML = msg;
+        d.style = "padding:10px;background:" + (type == "error" ? "#c0392b" : "#e1b12c") + ";color:#000";
+        w.appendChild(d);
+        if (type != "error") setTimeout(function () { w.removeChild(d); }, 5000);
+      }
+      var buildUrl = "Build";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/WebBuilds.data.unityweb",
+        frameworkUrl: buildUrl + "/WebBuilds.framework.js.unityweb",
+        codeUrl: buildUrl + "/WebBuilds.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "DefaultCompany",
+        productName: "Girls Hoo Hack 26",
+        productVersion: "0.1.0",
+        showBanner: showBanner,
+      };
+      // UI size: the game renders as if the window were UI_HEIGHT pixels tall and is stretched to fill it,
+      // so the on-screen text/UI keeps the same size in a small window, a big window or full screen.
+      // It's recalculated whenever the window resizes or goes full screen (that was the "tiny text in
+      // full screen" bug: it used to be worked out once at load). Smaller number = bigger text.
+      // Try it live: add ?ui=600 (bigger) or ?ui=1000 (smaller) to the address. ?ui=0 turns it off.
+      var UI_HEIGHT = Number(new URLSearchParams(location.search).get('ui') || 720);
+      var unity = null;
+      function uiPixelRatio() {
+        var h = canvas.clientHeight || window.innerHeight;
+        return Math.min(window.devicePixelRatio || 1, UI_HEIGHT / h);
+      }
+      function applyUiScale() {
+        if (!(UI_HEIGHT > 0)) return;
+        var r = uiPixelRatio();
+        config.devicePixelRatio = r;
+        if (unity && unity.Module) unity.Module.devicePixelRatio = r;
+      }
+      applyUiScale();
+      window.addEventListener('resize', applyUiScale);
+      document.addEventListener('fullscreenchange', applyUiScale);
+      document.addEventListener('webkitfullscreenchange', applyUiScale);
+      var script = document.createElement("script");
+      script.src = buildUrl + "/WebBuilds.loader.js";
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (p) {
+          document.querySelector("#fill").style.width = 100 * p + "%";
+        }).then(function (instance) {
+          unity = instance;
+          applyUiScale();
+          document.querySelector("#loading").style.display = "none";
+          canvas.focus();
+        }).catch(function (m) { showBanner(m, "error"); });
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>

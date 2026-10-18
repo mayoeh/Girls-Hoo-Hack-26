@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 public class SatelliteGame : MonoBehaviour
 {
-    enum State { Title, Trial, TrialDone, Countdown, Round, Caught, Results }
+    enum State { Title, Setup, Trial, TrialDone, Countdown, Round, Caught, Results }
 
     [Header("References (auto-found if empty)")]
     public ArmTest arm;
@@ -44,6 +44,12 @@ public class SatelliteGame : MonoBehaviour
     [Tooltip("All regular text and buttons")]
     public Font bodyFont;
 
+    [Header("Phone setup screen")]
+    [Tooltip("QR code for the controller page (auto-filled from Assets/ArmGame/ControllerQR.png).")]
+    public Texture2D controllerQr;
+    [Tooltip("The address the QR code opens. The QR is only shown when this matches ArmTest's relay address.")]
+    public string controllerQrUrl = "https://149-28-227-46.sslip.io/controller";
+
     [Header("Colors")]
     public Color outlineColor = new Color(0.3f, 0.85f, 1f, 1f);
     public Color readyColor = new Color(0.3f, 1f, 0.45f, 1f);
@@ -57,6 +63,9 @@ public class SatelliteGame : MonoBehaviour
     readonly List<float> times = new List<float>();
     readonly List<int> missedGrabs = new List<int>();
     readonly List<int> gotAway = new List<int>();
+    Leaderboard boardInstance;   // Tiger Data leaderboard: total time, fastest first
+    Leaderboard board => boardInstance ??= new Leaderboard(this, "satellite", " s", 2);
+    Vector2 resultsScroll;
 
     bool held;
     bool satVisible;
@@ -106,11 +115,12 @@ public class SatelliteGame : MonoBehaviour
 
         arm.showDebugGui = false;
         arm.GripPressed += OnGripPressed;
+        arm.PhoneCalibrated += OnPhoneCalibrated;
     }
 
     void OnDestroy()
     {
-        if (arm) arm.GripPressed -= OnGripPressed;
+        if (arm) { arm.GripPressed -= OnGripPressed; arm.PhoneCalibrated -= OnPhoneCalibrated; }
         if (instance == this) instance = null;
     }
 
@@ -228,6 +238,22 @@ public class SatelliteGame : MonoBehaviour
         ShowSatellite(true);
     }
 
+    // Phone setup: connect and calibrate before the trial can start.
+    bool setupCalibrated;
+
+    void EnterSetup()
+    {
+        SetState(State.Setup);
+        setupCalibrated = false;   // calibrate again each game, so the phone's "straight ahead" is right
+    }
+
+    void OnPhoneCalibrated()
+    {
+        if (state == State.Setup) setupCalibrated = true;
+    }
+
+    bool SetupReady => arm.PhoneConnected && setupCalibrated;
+
     void BeginTrial()
     {
         SetState(State.Trial);
@@ -259,7 +285,17 @@ public class SatelliteGame : MonoBehaviour
     {
         round++;
         held = false;
-        if (round >= rounds) { ShowSatellite(false); SetState(State.Results); }
+        if (round >= rounds)
+        {
+            ShowSatellite(false);
+            SetState(State.Results);
+            float total = 0f; int missed = 0, away = 0;
+            for (int i = 0; i < times.Count; i++) total += times[i];
+            foreach (int m in missedGrabs) missed += m;
+            foreach (int g in gotAway) away += g;
+            resultsScroll = Vector2.zero;
+            board.NewResult(total, $"{{\"rounds\":{times.Count},\"missedGrabs\":{missed},\"gotAway\":{away}}}");
+        }
         else BeginCountdown();
     }
 
@@ -269,12 +305,16 @@ public class SatelliteGame : MonoBehaviour
     {
         float dt = Time.deltaTime;
         stateTime += dt;
-        if (Pressed("c")) arm.Calibrate();
+        if (Pressed("c")) { arm.Calibrate(); if (state == State.Setup && arm.PhoneConnected) setupCalibrated = true; }
 
         switch (state)
         {
             case State.Title:
-                if (Pressed("space")) BeginTrial();
+                if (Pressed("space")) EnterSetup();
+                break;
+            case State.Setup:
+                if (Pressed("space") && SetupReady) BeginTrial();
+                if (Pressed("skip")) BeginTrial();   // Shift+S: developer skip, for testing without a phone
                 break;
             case State.TrialDone:
                 Drift(dt);
@@ -290,7 +330,7 @@ public class SatelliteGame : MonoBehaviour
                 if (stateTime >= caughtPause) NextRound();
                 break;
             case State.Results:
-                if (Pressed("space") || Pressed("r")) EnterTitle();
+                if (!Leaderboard.Typing && (Pressed("space") || Pressed("r"))) EnterTitle();
                 break;
         }
         arm.gripClosed = held;
@@ -375,9 +415,9 @@ public class SatelliteGame : MonoBehaviour
                     topPos = gripPoint.position;
                     velocity = (Vector3.up * 0.6f + Random.insideUnitSphere * 0.3f).normalized * reach * 0.12f;
                     SetState(State.TrialDone);
-                    Flash("Perfect release! Get ready for Round 1.");
+                    Flash("Perfect release! Get ready for Round 1");
                 }
-                else Flash($"Not lined up yet: {d:0.00} away (needs {m:0.00}). Keep moving into the outline.");
+                else Flash($"Not lined up yet: {d:0.00} away (needs {m:0.00}). Keep moving into the outline");
                 break;
             }
             case State.Round:
@@ -473,6 +513,7 @@ public class SatelliteGame : MonoBehaviour
             case "space": return kb.spaceKey.wasPressedThisFrame;
             case "c": return kb.cKey.wasPressedThisFrame;
             case "r": return kb.rKey.wasPressedThisFrame;
+            case "skip": return kb.shiftKey.isPressed && kb.sKey.wasPressedThisFrame;
         }
         return false;
 #else
@@ -495,7 +536,7 @@ public class SatelliteGame : MonoBehaviour
         ringFlat.enabled = showTrial || showRound;
         ringFacing.enabled = showTrial;
         approachLine.enabled = showRound;
-        gripRing.enabled = state == State.Title || state == State.Trial || state == State.Round;
+        gripRing.enabled = state == State.Title || state == State.Setup || state == State.Trial || state == State.Round;
 
         if (showTrial)
         {
@@ -548,8 +589,9 @@ public class SatelliteGame : MonoBehaviour
 #if UNITY_EDITOR
     void OnValidate()
     {
-        if (!titleFont) titleFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/AstroSpace.ttf");
-        if (!bodyFont) bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>("Assets/Fonts/ELEGANT TYPEWRITER Regular.ttf");
+        if (!titleFont) titleFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(GameFonts.TitlePath);
+        if (!bodyFont || GameFonts.IsOldFont(bodyFont)) bodyFont = UnityEditor.AssetDatabase.LoadAssetAtPath<Font>(GameFonts.BodyPath);
+        if (!controllerQr) controllerQr = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/ArmGame/ControllerQR.png");
         big = null;   // rebuild styles if fonts change in Play mode
     }
 #endif
@@ -558,12 +600,65 @@ public class SatelliteGame : MonoBehaviour
     {
         styleHeight = Screen.height;
         float s = Screen.height / 1080f;
+        // Shared fonts: Astro Space for titles, Clean Typewriter for the rest, kept sharp (see GameFonts).
+        GameFonts.Title = titleFont;
+        GameFonts.Body = bodyFont;
+        titleFont = GameFonts.Title;
+        bodyFont = GameFonts.Body;
         big = new GUIStyle(GUI.skin.label) { font = titleFont, fontSize = Mathf.RoundToInt(64 * s), alignment = TextAnchor.MiddleCenter, fontStyle = titleFont ? FontStyle.Normal : FontStyle.Bold, richText = true };
         mid = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(30 * s), alignment = TextAnchor.MiddleCenter, wordWrap = true, richText = true };
         small = new GUIStyle(GUI.skin.label) { font = bodyFont, fontSize = Mathf.RoundToInt(24 * s), alignment = TextAnchor.UpperLeft, wordWrap = true, richText = true };
         smallRight = new GUIStyle(small) { alignment = TextAnchor.UpperRight };
         instructions = new GUIStyle(small) { fontSize = Mathf.RoundToInt(34 * s) };
         button = new GUIStyle(GUI.skin.button) { font = bodyFont, fontSize = Mathf.RoundToInt(26 * s) };
+        fitted = new GUIStyle(instructions);
+        if (panelTex == null)
+        {
+            panelTex = new Texture2D(1, 1);
+            panelTex.SetPixel(0, 0, Color.white);
+            panelTex.Apply();
+        }
+    }
+
+    // Dark backing behind text so the arm and satellites don't make it hard to read.
+    GUIStyle fitted;
+    Texture2D panelTex;
+    static readonly Color PanelColor = new Color(0.03f, 0.04f, 0.06f, 0.93f);
+
+    void Backdrop(Rect r, float alpha = 0.93f, bool outline = true)
+    {
+        if (Event.current.type != EventType.Repaint) return;
+        Color old = GUI.color;
+        GUI.color = new Color(PanelColor.r, PanelColor.g, PanelColor.b, alpha);
+        GUI.DrawTexture(r, panelTex);
+        if (outline)
+        {
+            GUI.color = new Color(outlineColor.r, outlineColor.g, outlineColor.b, 0.45f);
+            GUI.DrawTexture(new Rect(r.x, r.y, r.width, 2f), panelTex);
+            GUI.DrawTexture(new Rect(r.x, r.yMax - 2f, r.width, 2f), panelTex);
+            GUI.DrawTexture(new Rect(r.x, r.y, 2f, r.height), panelTex);
+            GUI.DrawTexture(new Rect(r.xMax - 2f, r.y, 2f, r.height), panelTex);
+        }
+        GUI.color = old;
+    }
+
+    // A panel that fits on screen whatever its size or shape, centred.
+    static Rect FitPanel(float wantW, float wantH, float W, float H)
+    {
+        float m = 16f;
+        float w = Mathf.Min(wantW, W - 2f * m), h = Mathf.Min(wantH, H - 2f * m);
+        return new Rect(Mathf.Round((W - w) / 2f), Mathf.Round((H - h) / 2f), Mathf.Round(w), Mathf.Round(h));
+    }
+
+    // Shrinks the instruction text (down to a readable minimum) until it fits the space available.
+    GUIStyle FitText(string text, float width, float height, float s)
+    {
+        int size = Mathf.RoundToInt(34 * s);
+        int min = Mathf.Max(13, Mathf.RoundToInt(18 * s));
+        fitted.fontSize = size;
+        while (size > min && fitted.CalcHeight(new GUIContent(text), width) > height)
+            fitted.fontSize = --size;
+        return fitted;
     }
 
     void OnGUI()
@@ -578,6 +673,7 @@ public class SatelliteGame : MonoBehaviour
         switch (state)
         {
             case State.Title: DrawTitle(s, W, H); break;
+            case State.Setup: DrawSetup(s, W, H); break;
 
             case State.Trial:
             {
@@ -592,6 +688,7 @@ public class SatelliteGame : MonoBehaviour
             case State.Countdown:
             {
                 int n = Mathf.CeilToInt(countdownSeconds - stateTime);
+                Backdrop(new Rect(Mathf.Round(W * 0.3f), Mathf.Round(H * 0.3f - 10 * s), Mathf.Round(W * 0.4f), Mathf.Round(270 * s)), 0.8f);
                 GUI.Label(new Rect(0, H * 0.3f, W, 100 * s), $"ROUND {round + 1} / {rounds}", big);
                 GUI.Label(new Rect(0, H * 0.3f + 110 * s, W, 140 * s), $"<size={Mathf.RoundToInt(110 * s)}>{Mathf.Max(n, 1)}</size>", big);
                 break;
@@ -613,48 +710,129 @@ public class SatelliteGame : MonoBehaviour
         }
 
         if (Time.time < messageUntil && state != State.Title && state != State.Results)
+        {
+            Backdrop(new Rect(Mathf.Round(W * 0.2f), Mathf.Round(H - 175 * s), Mathf.Round(W * 0.6f), Mathf.Round(70 * s)), 0.8f, false);
             GUI.Label(new Rect(0, H - 170 * s, W, 60 * s), message, mid);
+        }
 
         if (state == State.Trial || state == State.Round)
+        {
+            Backdrop(new Rect(Mathf.Round(10 * s), Mathf.Round(H - 66 * s), Mathf.Round(330 * s), Mathf.Round(50 * s)), 0.75f, false);
             GUI.Label(new Rect(20 * s, H - 60 * s, W, 40 * s),
                 "Click: release & grab", small);
+        }
     }
 
     void DrawHeader(float s, float W, string title, string sub)
     {
+        Backdrop(new Rect(Mathf.Round(W * 0.12f), Mathf.Round(12 * s), Mathf.Round(W * 0.76f), Mathf.Round(180 * s)), 0.8f);
         GUI.Label(new Rect(0, 20 * s, W, 90 * s), title, big);
         GUI.Label(new Rect(W * 0.15f, 110 * s, W * 0.7f, 70 * s), sub, mid);
     }
 
     void DrawTitle(float s, float W, float H)
     {
-        Rect r = new Rect(W / 2 - 700 * s, H / 2 - 450 * s, 1400 * s, 900 * s);
-        GUI.Box(r, GUIContent.none);
-        GUILayout.BeginArea(new Rect(r.x + 40 * s, r.y + 30 * s, r.width - 80 * s, r.height - 60 * s));
-        GUILayout.Label("SATELLITE CATCH", big);
-        GUILayout.Space(10 * s);
-        GUILayout.Label(
+        Rect r = FitPanel(1400 * s, 900 * s, W, H);
+        Backdrop(r);
+        float pad = Mathf.Round(Mathf.Max(14f, 36 * s));
+        float innerW = r.width - 2f * pad;
+
+        // The Start button is pinned to the bottom of the panel, so text can never push it off screen.
+        float buttonH = Mathf.Round(Mathf.Max(40f, 70 * s));
+        Rect btn = new Rect(r.x + pad, r.yMax - pad - buttonH, innerW, buttonH);
+
+        string body =
             "<b>Controls</b>\n" +
             "• Phone: turn left/right and tilt up/down to aim the arm\n" +
             "• Mouse up/down: bend the wrist\n" +
-            "• Click (or the phone's Grab button): release or grab\n\n" +
+            "• Mouse click: release or grab\n\n" +
             "<b>How to play</b>\n" +
-            "1. Trial: the arm is holding a satellite. Release it inside the glowing outline.\n" +
-            $"2. Then {rounds} timed rounds: a satellite drifts past. Get the gripper ABOVE its glowing ring and grab it.\n" +
-            "3. If one drifts off screen, another comes, but the clock keeps running. Lowest times win!", instructions);
-        GUILayout.FlexibleSpace();
-        if (!arm.PhoneConnected) GUILayout.Label("<color=#fa6>Phone not connected yet</color>", instructions);
-        GUILayout.Label("Hold the phone flat and pointing straight ahead, then tap Calibrate on the phone.", instructions);
-        GUILayout.Space(10 * s);
-        if (GUILayout.Button("Start trial (Space)", button, GUILayout.Height(70 * s))) BeginTrial();
-        GUILayout.EndArea();
+            "1. Trial: Release the satellite inside the glowing outline.\n" +
+            $"2. {rounds} rounds: a satellite drifts past. Get the gripper ABOVE its glowing ring and grab it.\n" +
+            "3. If you miss a satellite don't worry, another will come by.\n\n" +
+            "Next you'll connect your phone as the controller.";
+
+        float titleH = big.CalcHeight(new GUIContent("SATELLITE CATCH"), innerW);
+        Rect titleRect = new Rect(r.x + pad, r.y + pad, innerW, titleH);
+        float textTop = titleRect.yMax + Mathf.Round(10 * s);
+        float textH = btn.y - Mathf.Round(12 * s) - textTop;
+
+        GUI.Label(titleRect, "SATELLITE CATCH", big);
+        GUIStyle textStyle = FitText(body, innerW, textH, s);
+        GUI.Label(new Rect(r.x + pad, textTop, innerW, textH), body, textStyle);
+        if (GUI.Button(btn, "Next: connect your phone (Space)", button)) EnterSetup();
+    }
+
+    // Step-by-step phone connection. Each step ticks green on its own; Start unlocks when all are done.
+    void DrawSetup(float s, float W, float H)
+    {
+        Rect r = FitPanel(1400 * s, 900 * s, W, H);
+        Backdrop(r);
+        float pad = Mathf.Round(Mathf.Max(14f, 36 * s));
+        float innerW = r.width - 2f * pad;
+        float buttonH = Mathf.Round(Mathf.Max(40f, 70 * s));
+        Rect btn = new Rect(r.x + pad, r.yMax - pad - buttonH, innerW, buttonH);
+
+        string url = arm.ControllerUrl;
+        bool showQr = controllerQr != null && string.Equals(url, controllerQrUrl, System.StringComparison.OrdinalIgnoreCase);
+
+        float titleH = big.CalcHeight(new GUIContent("CONNECT YOUR PHONE"), innerW);
+        GUI.Label(new Rect(r.x + pad, r.y + pad, innerW, titleH), "CONNECT YOUR PHONE", big);
+        float top = r.y + pad + titleH + Mathf.Round(10 * s);
+        float bottom = btn.y - Mathf.Round(12 * s);
+
+        // QR code on the right (if there's room), steps on the left.
+        float qrSize = showQr ? Mathf.Round(Mathf.Min(innerW * 0.34f, bottom - top, 420 * s)) : 0f;
+        if (qrSize < 90f) { showQr = false; qrSize = 0f; }
+        float stepsW = innerW - (showQr ? qrSize + pad : 0f);
+        if (showQr)
+        {
+            Rect q = new Rect(r.xMax - pad - qrSize, top, qrSize, qrSize);
+            if (Event.current.type == EventType.Repaint)
+            {
+                controllerQr.filterMode = FilterMode.Point;   // keep the squares sharp
+                GUI.DrawTexture(q, controllerQr, ScaleMode.ScaleToFit);
+            }
+            GUI.Label(new Rect(q.x, q.yMax + 4f, q.width, 30f * Mathf.Max(s, 0.6f)), "Scan with your phone camera", small);
+        }
+
+        bool relay = arm.RelayConnected, phone = arm.PhoneConnected, calibrated = setupCalibrated;
+        string Tick(bool done) => done ? "<color=#5f8>[DONE]</color>" : "<color=#fa6>[ .. ]</color>";
+
+        string steps =
+            $"{Tick(phone)}  <b>1. Open the controller on your phone</b>\n" +
+            (showQr ? "Scan the QR code, or go to:\n" : "On your phone's browser, go to:\n") +
+            $"<color=#8df>{url}</color>\n\n" +
+            $"{Tick(phone)}  <b>2. Tap Start on the phone</b>\n" +
+            "If it asks for motion access, tap Allow.\n" +
+            (phone ? "<color=#5f8>Phone connected!</color>\n\n"
+                   : relay ? "<color=#fa6>Waiting for the phone...</color>\n\n"
+                           : $"<color=#fa6>Game can't reach the server yet: {arm.Status}</color>\n\n") +
+            $"{Tick(calibrated)}  <b>3. Calibrate</b>\n" +
+            "Hold the phone flat, pointing straight at this screen, then tap Calibrate on the phone.\n" +
+            (calibrated ? "<color=#5f8>Calibrated! Move the phone: the arm should follow.</color>"
+                        : phone ? "<color=#fa6>Waiting for Calibrate...</color>" : "");
+
+        GUIStyle textStyle = FitText(steps, stepsW, bottom - top, s);
+        GUI.Label(new Rect(r.x + pad, top, stepsW, bottom - top), steps, textStyle);
+
+        bool ready = SetupReady;
+        GUI.enabled = ready;
+        if (GUI.Button(btn, ready ? "Start trial (Space)" : "Finish the steps above to start", button)) BeginTrial();
+        GUI.enabled = true;
     }
 
     void DrawResults(float s, float W, float H)
     {
-        Rect r = new Rect(W / 2 - 450 * s, H / 2 - 320 * s, 900 * s, 640 * s);
-        GUI.Box(r, GUIContent.none);
-        GUILayout.BeginArea(new Rect(r.x + 40 * s, r.y + 30 * s, r.width - 80 * s, r.height - 60 * s));
+        Rect r = FitPanel(900 * s, 1000 * s, W, H);
+        Backdrop(r);
+        float buttonH = Mathf.Round(Mathf.Max(40f, 60 * s)), pad = Mathf.Round(Mathf.Max(14f, 36 * s));
+        Rect btn = new Rect(r.x + pad, r.yMax - pad - buttonH, r.width - 2f * pad, buttonH);
+        if (GUI.Button(btn, "Play again (Space)", button)) EnterTitle();
+        float areaW = r.width - 2f * pad;
+        GUILayout.BeginArea(new Rect(r.x + pad, r.y + pad, areaW, btn.y - r.y - pad - 8f));
+        // Scrolls (mouse wheel) if the window is too short for the times + leaderboard.
+        resultsScroll = GUILayout.BeginScrollView(resultsScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar, GUIStyle.none);
         GUILayout.Label("MISSION COMPLETE", big);
         GUILayout.Space(20 * s);
 
@@ -673,8 +851,9 @@ public class SatelliteGame : MonoBehaviour
         }
         GUILayout.Space(20 * s);
         GUILayout.Label($"<b>Total: {total:0.00} s</b>", mid);
-        GUILayout.FlexibleSpace();
-        if (GUILayout.Button("Play again (Space)", button, GUILayout.Height(60 * s))) EnterTitle();
+        GUILayout.Space(16 * s);
+        board.DrawLayout(areaW - 20f, small, small, button);
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
 }

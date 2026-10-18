@@ -70,14 +70,37 @@ public class ArmTest : MonoBehaviour
     // (screen pixels), or (-1, -1) when it came from the phone.
     public event Action<Vector2> GripPressed;
 
+    // Fired when the phone's Calibrate button is pressed (used by the setup screen).
+    public event Action PhoneCalibrated;
+
     public string Status => info;
-    public bool PhoneConnected => hasData;
+    // True while the phone is actually sending (it sends ~30 times a second).
+    public bool PhoneConnected => hasData && Time.unscaledTime - lastMessageTime < 2f;
+    public bool RelayConnected => ws != null && ws.State == WebSocketState.Open;
+
+    // Web page the phone opens, worked out from the relay address:
+    // wss://host/?role=game -> https://host/controller (ws:// -> http://).
+    public string ControllerUrl
+    {
+        get
+        {
+            try
+            {
+                var u = new Uri(serverUrl);
+                string scheme = u.Scheme == "wss" ? "https" : "http";
+                string port = u.IsDefaultPort ? "" : ":" + u.Port;
+                return $"{scheme}://{u.Host}{port}/controller";
+            }
+            catch { return "(set Server Url on ArmTest)"; }
+        }
+    }
 
     WebSocket ws;
     float[] lastQ;
     Quaternion reference = Quaternion.identity;
     Quaternion smoothed = Quaternion.identity;
     bool hasData;
+    float lastMessageTime = -999f;
     bool needsCalibrate = true;
     string info = "Connecting to relay...";
     string result = "";
@@ -112,8 +135,12 @@ public class ArmTest : MonoBehaviour
             ws.OnMessage += bytes =>
             {
                 var msg = JsonUtility.FromJson<PhoneMessage>(System.Text.Encoding.UTF8.GetString(bytes));
-                if (msg.q != null && msg.q.Length == 4) { lastQ = msg.q; hasData = true; info = "Phone connected"; }
-                if (msg.cal) Calibrate();
+                if (msg.q != null && msg.q.Length == 4)
+                {
+                    lastQ = msg.q; hasData = true; info = "Phone connected";
+                    lastMessageTime = Time.unscaledTime;
+                }
+                if (msg.cal) { Calibrate(); PhoneCalibrated?.Invoke(); }
                 if (msg.snare) PressGrip(new Vector2(-1f, -1f));
             };
 
@@ -238,7 +265,7 @@ public class ArmTest : MonoBehaviour
     void OnGUI()
     {
         if (!showDebugGui) return;
-        var style = new GUIStyle(GUI.skin.label) { fontSize = 22 };
+        var style = GameFonts.AsBody(new GUIStyle(GUI.skin.label) { fontSize = 22 });
         GUI.Label(new Rect(20, 20, 900, 40), info, style);
         GUI.Label(new Rect(20, 60, 900, 40), result, style);
         GUI.Label(new Rect(20, 100, 900, 40),

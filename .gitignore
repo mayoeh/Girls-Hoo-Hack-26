@@ -118,3 +118,7 @@ node_modules/
 
 # Server secrets
 .env
+
+# Web builds of each game (big; upload them to the website instead)
+/WebBuilds/
+SiteMap_Root.glb

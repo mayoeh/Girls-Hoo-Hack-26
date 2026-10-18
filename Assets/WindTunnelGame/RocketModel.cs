@@ -21,7 +21,19 @@ public class RocketModel : MonoBehaviour
     public Color laminarPaint = new(0.25f, 0.6f, 1.2f);
     public Color turbulentPaint = new(1.25f, 0.35f, 0.12f);
 
+    [Header("Rocket paint")]
+    [Tooltip("White body with black-and-white roll-pattern bands (the checkered marking real rockets used to track spin). " +
+             "The nose stays bare metal, so it's clear which part you're designing.")]
+    public bool rocketPaint = true;
+    public Color paintWhite = new(0.9f, 0.9f, 0.88f);
+    public Color paintBlack = new(0.07f, 0.07f, 0.08f);
+
+    // Roll-pattern bands along the body, in body radii behind the shoulder, and the seam ring at the shoulder.
+    static readonly Vector2[] PaintBands = { new(0.55f, 1.35f), new(3.55f, 4.25f) };
+    const float SeamWidth = 0.05f, BaseRing = 0.12f;
+
     readonly List<Color> colors = new();
+    readonly List<Color> baseColors = new();   // the paint, before any flow tint
 
     public float NoseLength => shape.length * bodyRadius;
     public int ControlPointCount => shape.points.Count + 2;    // tip + shape points + shoulder
@@ -185,7 +197,7 @@ public class RocketModel : MonoBehaviour
             k = k * k * (3f - 2f * k);
             float churn = Mathf.PerlinNoise(uv.x * 40f - time * 8f, uv.y * 12f);
             Color flowColor = Color.Lerp(laminarPaint, turbulentPaint * (0.7f + 0.6f * churn), k);
-            Color c = Color.Lerp(metalColor, flowColor, amount);
+            Color c = Color.Lerp(i < baseColors.Count ? baseColors[i] : metalColor, flowColor, amount);
             if (marker && Mathf.Abs(uv.x - t) < 0.004f) c = Color.Lerp(c, Color.white * 1.5f, amount);
             colors[i] = c;
         }
@@ -194,7 +206,7 @@ public class RocketModel : MonoBehaviour
 
     public void ClearFlow()
     {
-        for (int i = 0; i < colors.Count; i++) colors[i] = metalColor;
+        for (int i = 0; i < colors.Count; i++) colors[i] = i < baseColors.Count ? baseColors[i] : metalColor;
         if (mesh != null) mesh.SetColors(colors);
     }
     public void Rebuild()
@@ -210,7 +222,13 @@ public class RocketModel : MonoBehaviour
         AddTailCap();
 
         colors.Clear();
-        for (int i = 0; i < verts.Count; i++) colors.Add(metalColor);
+        baseColors.Clear();
+        for (int i = 0; i < verts.Count; i++)
+        {
+            Color c = BaseColor(verts[i]);
+            baseColors.Add(c);
+            colors.Add(c);
+        }
 
         mesh.Clear();
         mesh.SetVertices(verts);
@@ -247,14 +265,46 @@ public class RocketModel : MonoBehaviour
             ringBottom.Add(RadiusAt(x, true));
             ringCenter.Add(CenterAt(x));
         }
+        // Body rings: evenly spaced, plus a pair either side of every paint edge so the stripes are crisp.
         const int bodyRings = 16;
-        for (int i = 1; i <= bodyRings; i++)
+        var xs = new List<float>();
+        for (int i = 1; i <= bodyRings; i++) xs.Add(bodyLength * i / bodyRings);
+        if (rocketPaint)
         {
-            ringX.Add(bodyLength * i / bodyRings);
+            float R = bodyRadius, eps = 0.004f * R;
+            var edges = new List<float> { SeamWidth * R, bodyLength - BaseRing * R };
+            foreach (var b in PaintBands) { edges.Add(b.x * R); edges.Add(b.y * R); }
+            foreach (float e in edges)
+                if (e - eps > 0f && e + eps < bodyLength) { xs.Add(e - eps); xs.Add(e + eps); }
+        }
+        xs.Sort();
+        float last = 0f;
+        foreach (float x in xs)
+        {
+            if (x - last < 1e-5f) continue;
+            last = x;
+            ringX.Add(x);
             ringTop.Add(bodyRadius);
             ringBottom.Add(bodyRadius);
             ringCenter.Add(0f);
         }
+    }
+
+    // Paint for one vertex: bare metal nose, a thin black seam at the shoulder, then a white body with
+    // two roll-pattern bands (quarters alternating black and white, offset band to band) and a black base ring.
+    Color BaseColor(Vector3 v)
+    {
+        if (!rocketPaint || v.x < 0f) return metalColor;
+        float R = bodyRadius, x = v.x;
+        if (x < SeamWidth * R || x > bodyLength - BaseRing * R) return paintBlack;
+        for (int b = 0; b < PaintBands.Length; b++)
+        {
+            if (x < PaintBands[b].x * R || x > PaintBands[b].y * R) continue;
+            float phi = Mathf.Atan2(v.z, v.y);   // 0 = top, -90° = the side facing the camera
+            int quarter = Mathf.FloorToInt((phi + Mathf.PI) / (0.5f * Mathf.PI)) & 3;
+            return (quarter + b) % 2 == 0 ? paintBlack : paintWhite;
+        }
+        return paintWhite;
     }
 
     // Radius around a ring: the top curve at phi = 0, the bottom curve at phi = 180°, blended smoothly between.
@@ -333,6 +383,9 @@ public class RocketModel : MonoBehaviour
 
     void OnDrawGizmos()
     {
+        // Editor helper only: in Play mode the Game view's Gizmos toggle would draw these
+        // outlines and dots on top of the game's panels.
+        if (Application.isPlaying) return;
         if (ringX.Count < 2) return;
         Gizmos.matrix = transform.localToWorldMatrix;
         float z = -(bodyRadius + 0.02f);
@@ -357,4 +410,4 @@ public class RocketModel : MonoBehaviour
             Gizmos.DrawSphere(new Vector3(b.x, b.y, z), size);
         }
     }
-}
+}

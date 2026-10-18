@@ -7,8 +7,8 @@ public class StarBreathingGlow : MonoBehaviour
     [ColorUsage(true, true)] public Color baseGlowColor = Color.cyan;
 
     [Header("Breathing Intensity Bounds")]
-    public float minIntensity = 0.5f; // Dim state (Inhale)
-    public float maxIntensity = 4.0f; // Bright state (Exhale)
+    public float minIntensity = 0.5f; // Dim state (fully breathed out)
+    public float maxIntensity = 4.0f; // Bright state (fully breathed in)
 
     [Header("UI Confirmation")]
     public TextMeshProUGUI statusText;
@@ -19,15 +19,30 @@ public class StarBreathingGlow : MonoBehaviour
     [Tooltip("Sensitivity to detect trend direction")]
     public float sensitivity = 0.005f;
 
-    [Header("Test Mode")]
+    [Header("Auto Pulse (guide star)")]
+    [Tooltip("When on, the star pulses by itself at the pace below. Used for the computer's guide star.")]
     public bool useAutoPulseTest = false;
+    [Tooltip("Breaths per minute for the auto pulse. One full dim+bright cycle = one breath.")]
+    public float pulseBreathsPerMinute = 8f;
     [Range(0f, 1f)] public float testBreathingInput = 0.5f;
 
     private Material objectMaterial;
     private float smoothedInputValue = 0.5f;
     private float baselineValue = 0.5f;
     private bool hasReceivedInput = false;
+    private float pulsePhase;
     private static readonly int EmissionColorID = Shader.PropertyToID("_EmissionColor");
+
+    /// <summary>0 = breathed out (dim), 1 = breathed in (bright).</summary>
+    public float CurrentLevel => smoothedInputValue;
+
+    // Auto-pulse timing, used by the on-screen breathing coach.
+    /// <summary>True while the auto pulse is in its "breathe in" (getting brighter) half.</summary>
+    public bool PulseInhaling => Mathf.Repeat(pulsePhase, Mathf.PI * 2f) < Mathf.PI;
+    /// <summary>0..1 progress through the current in or out half.</summary>
+    public float PulseHalfProgress => Mathf.Repeat(pulsePhase, Mathf.PI) / Mathf.PI;
+    /// <summary>Seconds in one in (or out) half of a breath.</summary>
+    public float PulseHalfSeconds => 30f / Mathf.Max(0.5f, pulseBreathsPerMinute);
 
     void Start()
     {
@@ -51,7 +66,9 @@ public class StarBreathingGlow : MonoBehaviour
     {
         if (useAutoPulseTest)
         {
-            float pulse = (Mathf.Sin(Time.time * 2.5f) + 1.0f) / 2.0f;
+            // Integrate phase so changing the pace mid-game doesn't make the star jump.
+            pulsePhase = Mathf.Repeat(pulsePhase + Time.deltaTime * Mathf.Max(0.5f, pulseBreathsPerMinute) / 60f * Mathf.PI * 2f, Mathf.PI * 2f);
+            float pulse = (Mathf.Sin(pulsePhase - Mathf.PI / 2f) + 1.0f) / 2.0f;
             UpdateGlowFromBreathing(pulse);
         }
     }
@@ -95,9 +112,9 @@ public class StarBreathingGlow : MonoBehaviour
 
     private void ApplyGlow(float t)
     {
-        // Dim on Inhale (t = 1.0), Glow on Exhale (t = 0.0)
-        float currentIntensity = Mathf.Lerp(maxIntensity, minIntensity, t);
-        
+        // Brighter as you breathe in (t = 1), dimmer as you breathe out (t = 0)
+        float currentIntensity = Mathf.Lerp(minIntensity, maxIntensity, t);
+
         if (objectMaterial != null)
         {
             Color finalColor = baseGlowColor * Mathf.Pow(2, currentIntensity);
