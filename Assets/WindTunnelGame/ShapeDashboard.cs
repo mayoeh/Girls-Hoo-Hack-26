@@ -2,7 +2,7 @@ using System.Globalization;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-// Two panels: TOOLS (top right: mirror, dots, undo) and NOSE SHAPE (bottom: the shape numbers, editable).
+// Two panels: TOOLS (top left: mirror, dots, undo) and NOSE SHAPE (bottom: the shape numbers, editable).
 // Sliders and number boxes change the shape, and every change is undoable.
 // Angle and bluntness snap the nose to a clean rounded cone; length and tip height keep your sculpted shape.
 public class ShapeDashboard : MonoBehaviour
@@ -10,7 +10,7 @@ public class ShapeDashboard : MonoBehaviour
     public RocketModel rocket;
     public NoseEditor editor;
     public ShapeHistory history;
-    public float toolsWidth = 270f;     // top-right tools panel
+    public float toolsWidth = 270f;     // top-left tools panel
     public float shapeWidth = 940f;     // bottom shape panel (shrinks on narrow screens)
 
     enum Field { None, Angle, Bluntness, Length, TipHeight }
@@ -125,10 +125,10 @@ public class ShapeDashboard : MonoBehaviour
         editingName = null;
     }
 
-    // Top right: editing tools.
+    // Top left: editing tools. (The MODELS panel is top right; the lab partner's tip sits under this one.)
     void DrawToolsPanel(Event e)
     {
-        Vector2 origin = new(Screen.width - toolsWidth - 12f, 12f);
+        Vector2 origin = new(12f, 12f);
         GUILayout.BeginArea(new Rect(origin.x, origin.y, toolsWidth, Screen.height - 24f));
         GUILayout.BeginVertical(panel);
 
@@ -156,6 +156,7 @@ public class ShapeDashboard : MonoBehaviour
 
         GUILayout.EndVertical();
         RegisterRect(e, origin, 0);
+        if (e.type == EventType.Repaint) UIPanels.ToolsBottom = origin.y + GUILayoutUtility.GetLastRect().yMax;
         GUILayout.EndArea();
     }
 
@@ -164,7 +165,7 @@ public class ShapeDashboard : MonoBehaviour
     {
         float w = Mathf.Min(Screen.width - 24f, shapeWidth);
         const float areaHeight = 200f;
-        Vector2 origin = new((Screen.width - w) / 2f, Screen.height - areaHeight - 40f);   // leaves room for the help line
+        Vector2 origin = new((Screen.width - w) / 2f, Screen.height - areaHeight - 12f);
 
         GUILayout.BeginArea(new Rect(origin.x, origin.y, w, areaHeight));
         GUILayout.FlexibleSpace();                       // sits on the bottom edge, also when collapsed
@@ -193,25 +194,14 @@ public class ShapeDashboard : MonoBehaviour
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
 
-            bool warning = fitNote.Length > 0 || !view.InTestedRange;
-            GUILayout.Label(NoteText(), warning ? warn : note);
+            // Only a real problem is shown here (the cone couldn't be built exactly as asked).
+            if (fitNote.Length > 0) GUILayout.Label(fitNote, warn);
         }
 
         GUILayout.EndVertical();
         RegisterRect(e, origin, 1);
+        if (e.type == EventType.Repaint) UIPanels.BottomPanelTop = origin.y + GUILayoutUtility.GetLastRect().y;
         GUILayout.EndArea();
-    }
-
-    string NoteText()
-    {
-        var parts = new System.Collections.Generic.List<string>();
-        if (fitNote.Length > 0) parts.Add(fitNote);
-        if (!view.InTestedRange) parts.Add("Angle is outside the 10–60° Mary Jackson tested.");
-        if (!view.mirrored)
-            parts.Add($"Top {view.top.noseAngle:0}° / {view.top.bluntness:0.00}  ·  Bottom {view.bottom.noseAngle:0}° / {view.bottom.bluntness:0.00}");
-        if (parts.Count == 0)
-            parts.Add("Angle and bluntness snap to a clean rounded cone. Length and tip height keep your shape.");
-        return string.Join("     ", parts);
     }
 
     void RegisterRect(Event e, Vector2 origin, int slot)
@@ -305,7 +295,7 @@ public class ShapeDashboard : MonoBehaviour
     {
         if (panel != null) return;
         var bg = new Texture2D(1, 1);
-        bg.SetPixel(0, 0, new Color(0.08f, 0.08f, 0.09f, 0.85f));
+        bg.SetPixel(0, 0, new Color(0.08f, 0.08f, 0.09f, 0.97f));   // nearly solid, so the model doesn't show through
         bg.Apply();
 
         panel = new GUIStyle(GUI.skin.box) { padding = new RectOffset(14, 14, 12, 12) };
@@ -327,4 +317,4 @@ public class ShapeDashboard : MonoBehaviour
         foreach (var s in new[] { label, value, note, warn, field, button })
             ShockwaveFonts.AsBody(s);
     }
-}
+}

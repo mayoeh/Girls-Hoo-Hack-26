@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 11c9960f50cdc084689abfaa7e83f4d6, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -162,7 +162,6 @@ MonoBehaviour:
   mirrorKey: 27
   addDotKey: 14
   removeDotKey: 13
-  showHelp: 1
 --- !u!4 &189845172
 Transform:
   m_ObjectHideFlags: 0
@@ -212,7 +211,6 @@ MonoBehaviour:
   ghostColor: {r: 1, g: 0.6, b: 0.2, a: 1}
   panelWidth: 300
   maxShown: 8
-  fileName: shockwave_trials.json
 --- !u!114 &189845176
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -484,6 +482,9 @@ MonoBehaviour:
   metalColor: {r: 0.62, g: 0.62, b: 0.65, a: 1}
   laminarPaint: {r: 0.25, g: 0.6, b: 1.2, a: 1}
   turbulentPaint: {r: 1.25, g: 0.35, b: 0.12, a: 1}
+  rocketPaint: 0
+  paintWhite: {r: 0.9, g: 0.9, b: 0.88, a: 1}
+  paintBlack: {r: 0.07, g: 0.07, b: 0.08, a: 1}
 --- !u!23 &621661395
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -550,7 +551,7 @@ Transform:
   m_GameObject: {fileID: 621661393}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.37, y: 0, z: 0}
+  m_LocalPosition: {x: 0.75, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -731,6 +732,7 @@ MonoBehaviour:
   history: {fileID: 0}
   trialLog: {fileID: 0}
   coach: {fileID: 0}
+  maxModels: 5
   targetMach: 2
   spinUpTime: 2.5
   atSpeedTime: 6
@@ -739,6 +741,9 @@ MonoBehaviour:
   backWallColor: {r: 0.13, g: 0.14, b: 0.16, a: 1}
   gridColor: {r: 0.24, g: 0.26, b: 0.3, a: 1}
   gridCell: 0.1
+  titleFont: {fileID: 12800000, guid: a8e0f5d10192578419383d48909920a0, type: 3}
+  bodyFont: {fileID: 12800000, guid: 508da929ed1857b41b319ce38aacaa33, type: 3}
+  labelFont: {fileID: 11400000, guid: 27fdb4eee91924543a86421eaf179ed4, type: 2}
 --- !u!4 &1794510920
 Transform:
   m_ObjectHideFlags: 0

@@ -87,6 +87,14 @@ public class FeedbackCoach : MonoBehaviour
         running = null;
     }
 
+    // Forget the last tip (new game).
+    public void Clear()
+    {
+        if (running != null) StopCoroutine(running);
+        running = null;
+        Show("", "");
+    }
+
     void Show(string text, string source)
     {
         Text = text;

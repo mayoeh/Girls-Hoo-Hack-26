@@ -8,6 +8,8 @@ public class TrialRecord
     public string name;
     public string savedAt;      // ISO date/time
     public string note;         // "Saved", "Fired", ...
+    public int model;           // 0 = the trial run (starting sphere), 1..5 = the player's models
+    public int run;             // 1 = first tunnel run of this model, 2+ = extra runs
     public NoseShape shape;
 
     // Shape numbers at save time
